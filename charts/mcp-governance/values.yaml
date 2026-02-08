@@ -1,0 +1,117 @@
+# -- Global settings
+namespace: mcp-governance
+
+# -- Controller settings
+controller:
+  # -- Number of controller replicas
+  replicas: 1
+  image:
+    # -- Controller image repository
+    repository: localhost/mcp-governance-controller
+    # -- Controller image tag
+    tag: latest
+    # -- Image pull policy (use "Never" for Kind, "Always" for remote registries)
+    pullPolicy: Never
+  # -- Controller API port
+  port: 8090
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readinessProbe:
+    initialDelaySeconds: 3
+    periodSeconds: 5
+  serviceAccount:
+    # -- Create a service account for the controller
+    create: true
+    # -- Name of the service account
+    name: mcp-governance-controller
+
+# -- Dashboard settings
+dashboard:
+  # -- Enable the dashboard deployment
+  enabled: true
+  # -- Number of dashboard replicas
+  replicas: 1
+  image:
+    # -- Dashboard image repository
+    repository: localhost/mcp-governance-dashboard
+    # -- Dashboard image tag
+    tag: latest
+    # -- Image pull policy (use "Never" for Kind, "Always" for remote registries)
+    pullPolicy: Never
+  # -- Dashboard port
+  port: 3000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  service:
+    # -- Service type: NodePort for Kind, LoadBalancer or ClusterIP for production
+    type: NodePort
+    # -- NodePort to expose (set to null to auto-assign)
+    nodePort: 30000
+  # -- API URL the dashboard uses to reach the controller
+  apiUrl: "http://localhost:8090"
+
+# -- CRD installation
+crds:
+  # -- Install governance CRDs (MCPGovernancePolicy, GovernanceEvaluation)
+  install: true
+  # -- Install external stub CRDs for demo (AgentGateway, Kagent)
+  installExternal: false
+
+# -- Sample resources
+samples:
+  # -- Install sample MCPGovernancePolicy and GovernanceEvaluation
+  install: false
+
+# -- Governance policy defaults (used when samples.install is true)
+governancePolicy:
+  name: enterprise-mcp-policy
+  spec:
+    requireAgentGateway: true
+    requireJWTAuth: true
+    requireRBAC: true
+    requireCORS: true
+    requireTLS: true
+    requirePromptGuard: true
+    requireRateLimit: true
+    maxToolsWarning: 10
+    maxToolsCritical: 15
+    scoringWeights:
+      agentGatewayIntegration: 25
+      authentication: 20
+      authorization: 15
+      corsPolicy: 10
+      tlsEncryption: 10
+      promptGuard: 5
+      rateLimit: 5
+      toolScope: 10
+    severityPenalties:
+      critical: 40
+      high: 25
+      medium: 15
+      low: 5
+    targetNamespaces:
+      - mcp-system
+      - agents
+      - default
+
+# -- Image pull secrets (for private registries)
+imagePullSecrets: []
+
+# -- Additional labels to apply to all resources
+commonLabels: {}
+
+# -- Additional annotations to apply to all resources
+commonAnnotations: {}

@@ -1,0 +1,41 @@
+🎉 MCP Governance has been deployed!
+
+📦 Components:
+  - Controller: mcp-governance-controller (port {{ .Values.controller.port }})
+{{- if .Values.dashboard.enabled }}
+  - Dashboard:  mcp-governance-dashboard (port {{ .Values.dashboard.port }})
+{{- end }}
+
+🔍 Check deployment status:
+  kubectl get pods -n {{ .Values.namespace }}
+
+{{- if .Values.dashboard.enabled }}
+
+🖥️ Access the Dashboard:
+{{- if eq .Values.dashboard.service.type "NodePort" }}
+  The dashboard is exposed via NodePort.
+  Open: http://localhost:{{ .Values.dashboard.port }}
+
+  If using Kind with port mappings:
+    open http://localhost:3000
+{{- else if eq .Values.dashboard.service.type "LoadBalancer" }}
+  The dashboard is exposed via LoadBalancer.
+  Get the external IP:
+    kubectl get svc -n {{ .Values.namespace }} mcp-governance-dashboard
+{{- else }}
+  Port-forward to access the dashboard:
+    kubectl port-forward -n {{ .Values.namespace }} svc/mcp-governance-dashboard {{ .Values.dashboard.port }}:{{ .Values.dashboard.port }}
+    open http://localhost:{{ .Values.dashboard.port }}
+{{- end }}
+{{- end }}
+
+📜 Access the API:
+  kubectl port-forward -n {{ .Values.namespace }} svc/mcp-governance-controller {{ .Values.controller.port }}:{{ .Values.controller.port }}
+  curl http://localhost:{{ .Values.controller.port }}/api/health
+
+{{- if not .Values.samples.install }}
+
+⚠️ No sample governance policy was installed. Create one:
+  kubectl apply -f deploy/samples/governance-policy.yaml
+  Or re-install with: --set samples.install=true
+{{- end }}

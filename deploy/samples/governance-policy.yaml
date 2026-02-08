@@ -1,0 +1,43 @@
+---
+# Sample MCPGovernancePolicy - defines what to check
+apiVersion: governance.mcp.io/v1alpha1
+kind: MCPGovernancePolicy
+metadata:
+  name: enterprise-mcp-policy
+spec:
+  requireAgentGateway: true
+  requireCORS: true
+  requireJWTAuth: true
+  requireRBAC: true
+  requirePromptGuard: true
+  requireTLS: true
+  requireRateLimit: true
+  maxToolsWarning: 10
+  maxToolsCritical: 15
+  scoringWeights:
+    agentGatewayIntegration: 25
+    authentication: 20
+    authorization: 15
+    corsPolicy: 10
+    tlsEncryption: 10
+    promptGuard: 5
+    rateLimit: 5
+    toolScope: 10
+  severityPenalties:
+    critical: 40
+    high: 25
+    medium: 15
+    low: 5
+  targetNamespaces:
+    - mcp-system
+    - agents
+    - default
+---
+# Sample GovernanceEvaluation trigger
+apiVersion: governance.mcp.io/v1alpha1
+kind: GovernanceEvaluation
+metadata:
+  name: enterprise-evaluation
+spec:
+  policyRef: enterprise-mcp-policy
+  evaluationScope: cluster

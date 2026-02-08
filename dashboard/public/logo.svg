@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="shieldInner" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4f46e5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#6366f1" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Outer shield shape -->
+  <path d="M100 10 L175 45 L175 105 C175 145 145 175 100 190 C55 175 25 145 25 105 L25 45 Z"
+        fill="url(#shieldGrad)" filter="url(#shadow)" />
+
+  <!-- Inner shield shape -->
+  <path d="M100 24 L165 54 L165 105 C165 140 138 166 100 179 C62 166 35 140 35 105 L35 54 Z"
+        fill="url(#shieldInner)" opacity="0.6" />
+
+  <!-- Darkened inner area for text contrast -->
+  <path d="M100 38 L155 63 L155 105 C155 135 132 157 100 168 C68 157 45 135 45 105 L45 63 Z"
+        fill="#1e1b4b" opacity="0.85" />
+
+  <!-- "M" letter -->
+  <text x="67" y="122" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+        font-size="56" font-weight="800" fill="white" letter-spacing="-2">M</text>
+
+  <!-- "G" letter -->
+  <text x="110" y="122" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+        font-size="56" font-weight="800" fill="#a5b4fc" letter-spacing="-2">G</text>
+
+  <!-- Small accent nodes (representing connected MCP endpoints) -->
+  <circle cx="100" cy="28" r="4" fill="#c7d2fe" opacity="0.9"/>
+  <circle cx="35" cy="80" r="3" fill="#c7d2fe" opacity="0.6"/>
+  <circle cx="165" cy="80" r="3" fill="#c7d2fe" opacity="0.6"/>
+
+  <!-- Connection lines from nodes to shield edge -->
+  <line x1="100" y1="28" x2="100" y2="38" stroke="#c7d2fe" stroke-width="1" opacity="0.5"/>
+  <line x1="35" y1="80" x2="45" y2="80" stroke="#c7d2fe" stroke-width="1" opacity="0.4"/>
+  <line x1="165" y1="80" x2="155" y2="80" stroke="#c7d2fe" stroke-width="1" opacity="0.4"/>
+</svg>
