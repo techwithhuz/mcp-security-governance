@@ -113,12 +113,13 @@ governancePolicy:
       high: 25
       medium: 15
       low: 5
-    targetNamespaces:
-      - mcp-system
-      - agents
-      - default
-      - kagent
-      - agentgateway-system
+    targetNamespaces: []
+    # -- Namespaces to exclude from scanning (system namespaces excluded by default)
+    excludeNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - local-path-storage
 
 # -- Image pull secrets (for private registries)
 imagePullSecrets: []

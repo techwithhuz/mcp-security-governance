@@ -23,6 +23,7 @@ interface ScoreCategory {
   weight: number;
   weighted: number;
   status: string;
+  infraAbsent?: boolean;
 }
 
 interface ScoreExplainerProps {

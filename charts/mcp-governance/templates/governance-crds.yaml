@@ -1,7 +1,12 @@
+{{- if .Values.crds.install }}
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: mcpgovernancepolicies.governance.mcp.io
+  labels:
+    {{- include "mcp-governance.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
 spec:
   group: governance.mcp.io
   versions:
@@ -161,6 +166,10 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: governanceevaluations.governance.mcp.io
+  labels:
+    {{- include "mcp-governance.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
 spec:
   group: governance.mcp.io
   versions:
@@ -306,3 +315,4 @@ spec:
     shortNames:
       - ge
       - goveval
+{{- end }}

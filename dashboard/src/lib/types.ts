@@ -28,6 +28,7 @@ export interface ScoreCategory {
   weight: number;
   weighted: number;
   status: 'passing' | 'warning' | 'failing' | 'critical';
+  infraAbsent?: boolean;
 }
 
 export interface ScoreResponse {

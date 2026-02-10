@@ -46,15 +46,29 @@ type ClusterState struct {
 
 // FilterByNamespaces returns a new ClusterState containing only resources whose
 // namespace is in the given list. Cluster-scoped resources (Gateways) are kept
-// as-is. If targetNamespaces is empty, the original state is returned unchanged.
-func (s *ClusterState) FilterByNamespaces(targetNamespaces []string) *ClusterState {
-	if len(targetNamespaces) == 0 {
+// as-is. If targetNamespaces is empty, the original state is returned unchanged
+// (after applying excludeNamespaces if provided).
+func (s *ClusterState) FilterByNamespaces(targetNamespaces, excludeNamespaces []string) *ClusterState {
+	if len(targetNamespaces) == 0 && len(excludeNamespaces) == 0 {
 		return s
 	}
 
-	allowed := make(map[string]bool, len(targetNamespaces))
-	for _, ns := range targetNamespaces {
-		allowed[ns] = true
+	// Build the allowed set: if targetNamespaces is specified, use it as the
+	// include list; otherwise start with all discovered namespaces.
+	allowed := make(map[string]bool)
+	if len(targetNamespaces) > 0 {
+		for _, ns := range targetNamespaces {
+			allowed[ns] = true
+		}
+	} else {
+		for _, ns := range s.Namespaces {
+			allowed[ns] = true
+		}
+	}
+
+	// Remove excluded namespaces
+	for _, ns := range excludeNamespaces {
+		delete(allowed, ns)
 	}
 
 	filtered := &ClusterState{
@@ -244,6 +258,15 @@ type ScoreBreakdown struct {
 	PromptGuardScore    int `json:"promptGuardScore"`
 	RateLimitScore      int `json:"rateLimitScore"`
 	ToolScopeScore      int `json:"toolScopeScore"`
+	// InfraAbsent tracks which categories scored 0 due to missing infrastructure
+	// (as opposed to penalty overflow). Key = category display name.
+	InfraAbsent map[string]bool `json:"infraAbsent,omitempty"`
+}
+
+// categoryScoreResult is the internal return type from calculateCategoryScore.
+type categoryScoreResult struct {
+	Score       int
+	InfraAbsent bool // true when score=0 is caused by missing infrastructure
 }
 
 type ResourceSummary struct {
@@ -278,6 +301,7 @@ type Policy struct {
 	MaxToolsWarning     int // If MCP server has more than this many tools, generate Warning
 	MaxToolsCritical    int // If MCP server has more than this many tools, generate Critical
 	TargetNamespaces    []string // If non-empty, only evaluate resources in these namespaces
+	ExcludeNamespaces   []string // Namespaces to exclude from evaluation (e.g. kube-system)
 	Weights             ScoringWeights
 	SeverityPenalties   SeverityPenalties
 }
@@ -301,6 +325,17 @@ type ScoringWeights struct {
 	ToolScope               int
 }
 
+// DefaultExcludeNamespaces returns the list of system namespaces that should
+// be excluded from scanning by default.
+func DefaultExcludeNamespaces() []string {
+	return []string{
+		"kube-system",
+		"kube-public",
+		"kube-node-lease",
+		"local-path-storage",
+	}
+}
+
 func DefaultPolicy() Policy {
 	return Policy{
 		RequireAgentGateway: true,
@@ -312,6 +347,7 @@ func DefaultPolicy() Policy {
 		RequireRateLimit:    false,
 		MaxToolsWarning:     10,
 		MaxToolsCritical:    15,
+		ExcludeNamespaces:   DefaultExcludeNamespaces(),
 		Weights: ScoringWeights{
 			AgentGatewayIntegration: 25,
 			Authentication:          20,
@@ -995,33 +1031,40 @@ func containsSubstr(s, substr string) bool {
 // ---------- SCORING ----------
 
 func calculateScores(state *ClusterState, findings []Finding, policy Policy) ScoreBreakdown {
-	// Start from 0 — earn points for having things configured correctly
-	breakdown := ScoreBreakdown{}
+	breakdown := ScoreBreakdown{
+		InfraAbsent: make(map[string]bool),
+	}
 
-	// AgentGateway: score based on gateway presence and routing coverage
+	apply := func(name string, r categoryScoreResult, target *int) {
+		*target = r.Score
+		if r.InfraAbsent {
+			breakdown.InfraAbsent[name] = true
+		}
+	}
+
 	if policy.RequireAgentGateway {
-		breakdown.AgentGatewayScore = calculateCategoryScore(CategoryAgentGateway, CategoryExposure, findings, state, policy)
+		apply("AgentGateway Compliance", calculateCategoryScore(CategoryAgentGateway, CategoryExposure, findings, state, policy), &breakdown.AgentGatewayScore)
 	}
 	if policy.RequireJWTAuth {
-		breakdown.AuthenticationScore = calculateCategoryScore(CategoryAuthentication, "", findings, state, policy)
+		apply("Authentication", calculateCategoryScore(CategoryAuthentication, "", findings, state, policy), &breakdown.AuthenticationScore)
 	}
 	if policy.RequireRBAC {
-		breakdown.AuthorizationScore = calculateCategoryScore(CategoryAuthorization, "", findings, state, policy)
+		apply("Authorization", calculateCategoryScore(CategoryAuthorization, "", findings, state, policy), &breakdown.AuthorizationScore)
 	}
 	if policy.RequireCORS {
-		breakdown.CORSScore = calculateCategoryScore(CategoryCORS, "", findings, state, policy)
+		apply("CORS", calculateCategoryScore(CategoryCORS, "", findings, state, policy), &breakdown.CORSScore)
 	}
 	if policy.RequireTLS {
-		breakdown.TLSScore = calculateCategoryScore(CategoryTLS, "", findings, state, policy)
+		apply("TLS", calculateCategoryScore(CategoryTLS, "", findings, state, policy), &breakdown.TLSScore)
 	}
 	if policy.RequirePromptGuard {
-		breakdown.PromptGuardScore = calculateCategoryScore(CategoryPromptGuard, "", findings, state, policy)
+		apply("Prompt Guard", calculateCategoryScore(CategoryPromptGuard, "", findings, state, policy), &breakdown.PromptGuardScore)
 	}
 	if policy.RequireRateLimit {
-		breakdown.RateLimitScore = calculateCategoryScore(CategoryRateLimit, "", findings, state, policy)
+		apply("Rate Limit", calculateCategoryScore(CategoryRateLimit, "", findings, state, policy), &breakdown.RateLimitScore)
 	}
 	if policy.MaxToolsWarning > 0 || policy.MaxToolsCritical > 0 {
-		breakdown.ToolScopeScore = calculateCategoryScore(CategoryToolScope, "", findings, state, policy)
+		apply("Tool Scope", calculateCategoryScore(CategoryToolScope, "", findings, state, policy), &breakdown.ToolScopeScore)
 	}
 
 	return breakdown
@@ -1031,7 +1074,7 @@ func calculateScores(state *ClusterState, findings []Finding, policy Policy) Sco
 // If no findings exist = fully compliant = 100.
 // If ANY Critical finding exists for "no infrastructure" = 0 (nothing is deployed).
 // Otherwise, deduct from 100 based on findings severity (partial compliance).
-func calculateCategoryScore(primaryCategory, secondaryCategory string, findings []Finding, state *ClusterState, policy Policy) int {
+func calculateCategoryScore(primaryCategory, secondaryCategory string, findings []Finding, state *ClusterState, policy Policy) categoryScoreResult {
 	// Collect findings for this category
 	var categoryFindings []Finding
 	for _, f := range findings {
@@ -1042,14 +1085,14 @@ func calculateCategoryScore(primaryCategory, secondaryCategory string, findings 
 
 	// No findings = fully compliant
 	if len(categoryFindings) == 0 {
-		return 100
+		return categoryScoreResult{Score: 100}
 	}
 
 	// Check if any finding indicates total absence of infrastructure.
 	// These are the "no infrastructure" findings that mean score = 0.
 	for _, f := range categoryFindings {
 		if isInfrastructureAbsenceFinding(f) {
-			return 0
+			return categoryScoreResult{Score: 0, InfraAbsent: true}
 		}
 	}
 
@@ -1061,9 +1104,9 @@ func calculateCategoryScore(primaryCategory, secondaryCategory string, findings 
 
 	score := 100 - penalty
 	if score < 0 {
-		return 0
+		return categoryScoreResult{Score: 0}
 	}
-	return score
+	return categoryScoreResult{Score: score}
 }
 
 // isInfrastructureAbsenceFinding returns true for findings that indicate

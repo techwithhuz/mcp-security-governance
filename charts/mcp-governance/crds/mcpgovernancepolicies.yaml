@@ -100,6 +100,12 @@ spec:
                       description: "Points deducted per Low finding"
                 targetNamespaces:
                   type: array
+                  description: "Namespaces to monitor. If empty, all namespaces are monitored (recommended)."
+                  items:
+                    type: string
+                excludeNamespaces:
+                  type: array
+                  description: "Namespaces to exclude from monitoring (e.g. kube-system). Applied after targetNamespaces."
                   items:
                     type: string
             status:

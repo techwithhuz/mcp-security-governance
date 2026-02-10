@@ -44,13 +44,13 @@ func main() {
 	currentState = doDiscovery()
 	policy = loadPolicy()
 	lastCluster = currentState
-	lastResult = evaluator.Evaluate(currentState.FilterByNamespaces(policy.TargetNamespaces), policy)
+	lastResult = evaluator.Evaluate(currentState.FilterByNamespaces(policy.TargetNamespaces, policy.ExcludeNamespaces), policy)
 	recordTrendPoint(lastResult)
-	log.Printf("[governance] Initial evaluation. Score: %d, Findings: %d (Policy: AgentGW=%v, CORS=%v, JWT=%v, RBAC=%v, TLS=%v, PromptGuard=%v, RateLimit=%v, TargetNS=%v)", 
+	log.Printf("[governance] Initial evaluation. Score: %d, Findings: %d (Policy: AgentGW=%v, CORS=%v, JWT=%v, RBAC=%v, TLS=%v, PromptGuard=%v, RateLimit=%v, TargetNS=%v, ExcludeNS=%v)", 
 		lastResult.Score, len(lastResult.Findings),
 		policy.RequireAgentGateway, policy.RequireCORS, policy.RequireJWTAuth, 
 		policy.RequireRBAC, policy.RequireTLS, policy.RequirePromptGuard, policy.RequireRateLimit,
-		policy.TargetNamespaces)
+		policy.TargetNamespaces, policy.ExcludeNamespaces)
 
 	// Periodic re-evaluation
 	go func() {
@@ -58,7 +58,7 @@ func main() {
 		for range ticker.C {
 			cs := doDiscovery()
 			p := loadPolicy()
-			res := evaluator.Evaluate(cs.FilterByNamespaces(p.TargetNamespaces), p)
+			res := evaluator.Evaluate(cs.FilterByNamespaces(p.TargetNamespaces, p.ExcludeNamespaces), p)
 
 			stateMu.Lock()
 			currentState = cs
@@ -168,11 +168,12 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type categoryDetail struct {
-		Category string  `json:"category"`
-		Score    int     `json:"score"`
-		Weight   int     `json:"weight"`
-		Weighted float64 `json:"weighted"`
-		Status   string  `json:"status"`
+		Category    string  `json:"category"`
+		Score       int     `json:"score"`
+		Weight      int     `json:"weight"`
+		Weighted    float64 `json:"weighted"`
+		Status      string  `json:"status"`
+		InfraAbsent bool    `json:"infraAbsent"`
 	}
 	// Build explanation of how each category contributes
 	pw := snap.policy.Weights
@@ -183,35 +184,35 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 	
 	if snap.policy.RequireAgentGateway {
 		totalWeight += pw.AgentGatewayIntegration
-		cats = append(cats, categoryDetail{"AgentGateway Compliance", bd.AgentGatewayScore, pw.AgentGatewayIntegration, 0, statusLabel(bd.AgentGatewayScore)})
+		cats = append(cats, categoryDetail{"AgentGateway Compliance", bd.AgentGatewayScore, pw.AgentGatewayIntegration, 0, statusLabel(bd.AgentGatewayScore), bd.InfraAbsent["AgentGateway Compliance"]})
 	}
 	if snap.policy.RequireJWTAuth {
 		totalWeight += pw.Authentication
-		cats = append(cats, categoryDetail{"Authentication", bd.AuthenticationScore, pw.Authentication, 0, statusLabel(bd.AuthenticationScore)})
+		cats = append(cats, categoryDetail{"Authentication", bd.AuthenticationScore, pw.Authentication, 0, statusLabel(bd.AuthenticationScore), bd.InfraAbsent["Authentication"]})
 	}
 	if snap.policy.RequireRBAC {
 		totalWeight += pw.Authorization
-		cats = append(cats, categoryDetail{"Authorization", bd.AuthorizationScore, pw.Authorization, 0, statusLabel(bd.AuthorizationScore)})
+		cats = append(cats, categoryDetail{"Authorization", bd.AuthorizationScore, pw.Authorization, 0, statusLabel(bd.AuthorizationScore), bd.InfraAbsent["Authorization"]})
 	}
 	if snap.policy.RequireCORS {
 		totalWeight += pw.CORSPolicy
-		cats = append(cats, categoryDetail{"CORS", bd.CORSScore, pw.CORSPolicy, 0, statusLabel(bd.CORSScore)})
+		cats = append(cats, categoryDetail{"CORS", bd.CORSScore, pw.CORSPolicy, 0, statusLabel(bd.CORSScore), bd.InfraAbsent["CORS"]})
 	}
 	if snap.policy.RequireTLS {
 		totalWeight += pw.TLSEncryption
-		cats = append(cats, categoryDetail{"TLS", bd.TLSScore, pw.TLSEncryption, 0, statusLabel(bd.TLSScore)})
+		cats = append(cats, categoryDetail{"TLS", bd.TLSScore, pw.TLSEncryption, 0, statusLabel(bd.TLSScore), bd.InfraAbsent["TLS"]})
 	}
 	if snap.policy.RequirePromptGuard {
 		totalWeight += pw.PromptGuard
-		cats = append(cats, categoryDetail{"Prompt Guard", bd.PromptGuardScore, pw.PromptGuard, 0, statusLabel(bd.PromptGuardScore)})
+		cats = append(cats, categoryDetail{"Prompt Guard", bd.PromptGuardScore, pw.PromptGuard, 0, statusLabel(bd.PromptGuardScore), bd.InfraAbsent["Prompt Guard"]})
 	}
 	if snap.policy.RequireRateLimit {
 		totalWeight += pw.RateLimit
-		cats = append(cats, categoryDetail{"Rate Limit", bd.RateLimitScore, pw.RateLimit, 0, statusLabel(bd.RateLimitScore)})
+		cats = append(cats, categoryDetail{"Rate Limit", bd.RateLimitScore, pw.RateLimit, 0, statusLabel(bd.RateLimitScore), bd.InfraAbsent["Rate Limit"]})
 	}
 	if snap.policy.MaxToolsWarning > 0 || snap.policy.MaxToolsCritical > 0 {
 		totalWeight += pw.ToolScope
-		cats = append(cats, categoryDetail{"Tool Scope", bd.ToolScopeScore, pw.ToolScope, 0, statusLabel(bd.ToolScopeScore)})
+		cats = append(cats, categoryDetail{"Tool Scope", bd.ToolScopeScore, pw.ToolScope, 0, statusLabel(bd.ToolScopeScore), bd.InfraAbsent["Tool Scope"]})
 	}
 	
 	if totalWeight == 0 {

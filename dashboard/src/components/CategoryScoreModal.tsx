@@ -38,6 +38,7 @@ interface ScoreCategory {
   weight: number;
   weighted: number;
   status: string;
+  infraAbsent?: boolean;
 }
 
 interface SeverityPenalties {
@@ -105,7 +106,10 @@ export default function CategoryScoreModal({ category, findings, severityPenalti
     }));
 
   const totalPenalty = penaltyBreakdown.reduce((sum, p) => sum + p.totalPenalty, 0);
-  const hasInfraAbsence = category.score === 0 && findings.length > 0;
+  // Use the API-provided flag instead of guessing from score === 0.
+  // infraAbsent is true only when the score is 0 due to missing infrastructure,
+  // not when it's 0 due to penalty overflow (e.g. 3 × Critical = 120 > 100).
+  const hasInfraAbsence = category.infraAbsent === true;
 
   const config = statusConfig[category.status] || statusConfig.critical;
 

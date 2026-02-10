@@ -98,12 +98,7 @@ func (d *K8sDiscoverer) discoverNamespaces(ctx context.Context) []string {
 	}
 	var namespaces []string
 	for _, ns := range nsList.Items {
-		// Skip kube-system and other internal namespaces for governance
-		name := ns.Name
-		if name == "kube-system" || name == "kube-public" || name == "kube-node-lease" || name == "local-path-storage" {
-			continue
-		}
-		namespaces = append(namespaces, name)
+		namespaces = append(namespaces, ns.Name)
 	}
 	return namespaces
 }
@@ -725,7 +720,7 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 		policy.SeverityPenalties = evaluator.DefaultSeverityPenalties()
 	}
 
-	// Parse target namespaces
+	// Parse target namespaces (optional – empty means scan all namespaces)
 	if nsList, ok := spec["targetNamespaces"].([]interface{}); ok {
 		for _, ns := range nsList {
 			if s, ok := ns.(string); ok {
@@ -734,7 +729,20 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 		}
 	}
 
-	log.Printf("[discovery] Loaded MCPGovernancePolicy: %s/%s", policyObj.GetNamespace(), policyObj.GetName())
+	// Parse exclude namespaces; fall back to sensible defaults when not specified
+	if nsList, ok := spec["excludeNamespaces"].([]interface{}); ok {
+		for _, ns := range nsList {
+			if s, ok := ns.(string); ok {
+				policy.ExcludeNamespaces = append(policy.ExcludeNamespaces, s)
+			}
+		}
+	}
+	if len(policy.ExcludeNamespaces) == 0 {
+		policy.ExcludeNamespaces = evaluator.DefaultExcludeNamespaces()
+	}
+
+	log.Printf("[discovery] Loaded MCPGovernancePolicy: %s/%s (targetNS=%v, excludeNS=%v)",
+		policyObj.GetNamespace(), policyObj.GetName(), policy.TargetNamespaces, policy.ExcludeNamespaces)
 	return policy
 }
 

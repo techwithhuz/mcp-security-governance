@@ -38,8 +38,10 @@ type MCPGovernancePolicySpec struct {
 	ScoringWeights ScoringWeights `json:"scoringWeights,omitempty"`
 	// SeverityPenalties defines the point deductions per severity level
 	SeverityPenalties SeverityPenalties `json:"severityPenalties,omitempty"`
-	// TargetNamespaces is the list of namespaces to monitor (empty = all)
+	// TargetNamespaces is the list of namespaces to monitor (empty = all namespaces)
 	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
+	// ExcludeNamespaces is the list of namespaces to exclude from monitoring
+	ExcludeNamespaces []string `json:"excludeNamespaces,omitempty"`
 }
 
 type SeverityPenalties struct {
