@@ -1,0 +1,193 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  CONTROLLER_IMAGE: ghcr.io/${{ github.repository_owner }}/mcp-governance-controller
+  DASHBOARD_IMAGE: ghcr.io/${{ github.repository_owner }}/mcp-governance-dashboard
+
+jobs:
+  # ──────────────────────────────────────
+  # Build & push controller image
+  # ──────────────────────────────────────
+  controller-image:
+    name: Controller Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push controller image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./controller
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.CONTROLLER_IMAGE }}:${{ steps.version.outputs.VERSION }}
+            ${{ env.CONTROLLER_IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.title=mcp-governance-controller
+            org.opencontainers.image.description=MCP Governance Controller
+            org.opencontainers.image.version=${{ steps.version.outputs.VERSION }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  # ──────────────────────────────────────
+  # Build & push dashboard image
+  # ──────────────────────────────────────
+  dashboard-image:
+    name: Dashboard Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./dashboard
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.DASHBOARD_IMAGE }}:${{ steps.version.outputs.VERSION }}
+            ${{ env.DASHBOARD_IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.title=mcp-governance-dashboard
+            org.opencontainers.image.description=MCP Governance Dashboard
+            org.opencontainers.image.version=${{ steps.version.outputs.VERSION }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  # ──────────────────────────────────────
+  # Package & publish Helm chart
+  # ──────────────────────────────────────
+  helm-chart:
+    name: Helm Chart
+    runs-on: ubuntu-latest
+    needs: [controller-image, dashboard-image]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.15.0
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Update Chart.yaml version
+        run: |
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.VERSION }}/" charts/mcp-governance/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.VERSION }}\"/" charts/mcp-governance/Chart.yaml
+
+      - name: Update default image values
+        run: |
+          sed -i "s|repository: localhost/mcp-governance-controller|repository: ${{ env.CONTROLLER_IMAGE }}|" charts/mcp-governance/values.yaml
+          sed -i "s|repository: localhost/mcp-governance-dashboard|repository: ${{ env.DASHBOARD_IMAGE }}|" charts/mcp-governance/values.yaml
+          sed -i "s|tag: latest|tag: ${{ steps.version.outputs.VERSION }}|g" charts/mcp-governance/values.yaml
+          sed -i "s|pullPolicy: Never|pullPolicy: IfNotPresent|g" charts/mcp-governance/values.yaml
+
+      - name: Lint chart
+        run: helm lint charts/mcp-governance
+
+      - name: Package chart
+        run: helm package charts/mcp-governance --destination .helm-packages
+
+      - name: Log in to GHCR for Helm
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push chart to GHCR
+        run: helm push .helm-packages/mcp-governance-${{ steps.version.outputs.VERSION }}.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+
+  # ──────────────────────────────────────
+  # Create GitHub Release
+  # ──────────────────────────────────────
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [controller-image, dashboard-image, helm-chart]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          cat <<'EOF' > release-notes.md
+          ## 🚀 MCP Governance v${{ steps.version.outputs.VERSION }}
+
+          ### Container Images
+
+          ```bash
+          # Controller
+          docker pull ${{ env.CONTROLLER_IMAGE }}:${{ steps.version.outputs.VERSION }}
+
+          # Dashboard
+          docker pull ${{ env.DASHBOARD_IMAGE }}:${{ steps.version.outputs.VERSION }}
+          ```
+
+          ### Helm Chart
+
+          ```bash
+          helm install mcp-governance \
+            oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/mcp-governance \
+            --version ${{ steps.version.outputs.VERSION }} \
+            --create-namespace \
+            --set samples.install=true
+          ```
+
+          ### Quick Start (kubectl)
+
+          ```bash
+          kubectl create namespace mcp-governance
+          kubectl apply -f deploy/crds/governance-crds.yaml
+          kubectl apply -f deploy/k8s/deployment.yaml
+          kubectl apply -f deploy/samples/governance-policy.yaml
+          ```
+
+          > **Note:** Update image references in `deploy/k8s/deployment.yaml` to use the published images above.
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          generate_release_notes: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

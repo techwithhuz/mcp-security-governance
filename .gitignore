@@ -1,0 +1,38 @@
+# ── Dependencies ─────────────────────────
+node_modules/
+dashboard/node_modules/
+
+# ── Build outputs ────────────────────────
+dashboard/.next/
+dashboard/out/
+controller/governance-api
+
+# ── OS files ─────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ──────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Environment ──────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Helm packages ────────────────────────
+.helm-packages/
+*.tgz
+
+# ── Container image archives ─────────────
+/tmp/*.tar
+*.tar
+
+# ── Go ───────────────────────────────────
+controller/vendor/
+
+# ── Misc ─────────────────────────────────
+*.log

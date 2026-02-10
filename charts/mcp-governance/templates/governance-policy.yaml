@@ -1,0 +1,20 @@
+{{- if .Values.samples.install }}
+apiVersion: governance.mcp.io/v1alpha1
+kind: MCPGovernancePolicy
+metadata:
+  name: {{ .Values.governancePolicy.name }}
+  labels:
+    {{- include "mcp-governance.labels" . | nindent 4 }}
+spec:
+  {{- toYaml .Values.governancePolicy.spec | nindent 2 }}
+---
+apiVersion: governance.mcp.io/v1alpha1
+kind: GovernanceEvaluation
+metadata:
+  name: enterprise-evaluation
+  labels:
+    {{- include "mcp-governance.labels" . | nindent 4 }}
+spec:
+  policyRef: {{ .Values.governancePolicy.name }}
+  evaluationScope: cluster
+{{- end }}

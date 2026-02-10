@@ -1,0 +1,115 @@
+---
+# Minimal AgentgatewayBackend CRD for demo
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: agentgatewaybackends.agentgateway.dev
+spec:
+  group: agentgateway.dev
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+  scope: Namespaced
+  names:
+    plural: agentgatewaybackends
+    singular: agentgatewaybackend
+    kind: AgentgatewayBackend
+    shortNames:
+      - agwbe
+---
+# Minimal AgentgatewayPolicy CRD for demo
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: agentgatewaypolicies.agentgateway.dev
+spec:
+  group: agentgateway.dev
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+  scope: Namespaced
+  names:
+    plural: agentgatewaypolicies
+    singular: agentgatewaypolicy
+    kind: AgentgatewayPolicy
+    shortNames:
+      - agwpol
+---
+# Minimal Kagent Agent CRD for demo (v1alpha2)
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: agents.kagent.dev
+spec:
+  group: kagent.dev
+  versions:
+    - name: v1alpha2
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+  scope: Namespaced
+  names:
+    plural: agents
+    singular: agent
+    kind: Agent
+    shortNames:
+      - kag
+---
+# Minimal Kagent MCPServer CRD for demo (v1alpha1)
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mcpservers.kagent.dev
+spec:
+  group: kagent.dev
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+  scope: Namespaced
+  names:
+    plural: mcpservers
+    singular: mcpserver
+    kind: MCPServer
+    shortNames:
+      - mcps
+---
+# Minimal Kagent RemoteMCPServer CRD for demo (v1alpha1)
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: remotemcpservers.kagent.dev
+spec:
+  group: kagent.dev
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+  scope: Namespaced
+  names:
+    plural: remotemcpservers
+    singular: remotemcpserver
+    kind: RemoteMCPServer
+    shortNames:
+      - rmcps

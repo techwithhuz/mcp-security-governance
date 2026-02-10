@@ -1,0 +1,19 @@
+apiVersion: v2
+name: mcp-governance
+description: Kubernetes-native governance for MCP (Model Context Protocol) infrastructure
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - mcp
+  - governance
+  - security
+  - kubernetes
+  - ai
+  - agentgateway
+  - kagent
+home: https://github.com/techwithhuz/mcp-security-governance
+sources:
+  - https://github.com/techwithhuz/mcp-security-governance
+maintainers:
+  - name: techwithhuz

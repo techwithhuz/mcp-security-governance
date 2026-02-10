@@ -1,0 +1,216 @@
+---
+# ============================================
+# AGENTGATEWAY SAMPLE RESOURCES
+# These simulate a partially-compliant setup
+# ============================================
+
+# Gateway using agentgateway
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: mcp-gateway
+  namespace: mcp-system
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+
+---
+# MCP Backend - correctly configured
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: tools-backend
+  namespace: mcp-system
+spec:
+  type: mcp
+  mcp:
+    targets:
+      - name: calculator-mcp
+        host: calculator-mcp.mcp-system.svc.cluster.local
+        port: 8080
+      - name: weather-mcp
+        host: weather-mcp.mcp-system.svc.cluster.local
+        port: 8080
+
+---
+# MCP Backend - missing auth (will trigger finding)
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: unprotected-backend
+  namespace: mcp-system
+spec:
+  type: mcp
+  mcp:
+    targets:
+      - name: internal-tools
+        host: internal-tools.default.svc.cluster.local
+        port: 9090
+
+---
+# Policy with weak JWT (short expiry not enforced)
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: weak-auth-policy
+  namespace: mcp-system
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: mcp-gateway
+  default:
+    jwt:
+      providers:
+        - name: auth0
+          issuer: "https://dev-example.auth0.com/"
+          audiences:
+            - "https://mcp-api.example.com"
+
+---
+# HTTPRoute - no CORS policy attached
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: tools-route
+  namespace: mcp-system
+spec:
+  parentRefs:
+    - name: mcp-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /tools
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: tools-backend
+
+---
+# HTTPRoute - exposed without auth
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: open-route
+  namespace: mcp-system
+spec:
+  parentRefs:
+    - name: mcp-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /public
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: unprotected-backend
+
+---
+# ============================================
+# KAGENT SAMPLE RESOURCES
+# ============================================
+
+# Agent with tools via agentgateway (compliant)
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: research-agent
+  namespace: agents
+  labels:
+    kagent.dev/discovery: disabled
+spec:
+  description: "Research assistant agent"
+  modelConfig:
+    provider: openai
+    model: gpt-4
+  tools:
+    - type: McpServer
+      mcpServer:
+        ref:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: tools-via-gateway
+
+---
+# Agent without agentgateway routing (non-compliant)
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: unmanaged-agent
+  namespace: agents
+spec:
+  description: "Agent accessing MCP directly"
+  modelConfig:
+    provider: openai
+    model: gpt-4
+  tools:
+    - type: McpServer
+      mcpServer:
+        ref:
+          apiGroup: kagent.dev
+          kind: MCPServer
+          name: direct-mcp-server
+
+---
+# MCPServer - direct access, not through gateway (non-compliant)
+apiVersion: kagent.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: direct-mcp-server
+  namespace: agents
+spec:
+  stdioTransport:
+    command: "/usr/local/bin/mcp-server"
+    args: ["--port", "8080"]
+  deployment:
+    replicas: 1
+    image: example/mcp-server:latest
+
+---
+# RemoteMCPServer - routed through agentgateway (compliant)
+apiVersion: kagent.dev/v1alpha1
+kind: RemoteMCPServer
+metadata:
+  name: tools-via-gateway
+  namespace: agents
+spec:
+  url: "http://mcp-gateway.mcp-system.svc.cluster.local:8080/tools"
+  transport: sse
+
+---
+# MCP Service without appProtocol (non-compliant)
+apiVersion: v1
+kind: Service
+metadata:
+  name: raw-mcp-service
+  namespace: agents
+  labels:
+    app: mcp-server
+spec:
+  selector:
+    app: mcp-server
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+---
+# MCP Service with correct appProtocol (compliant)
+apiVersion: v1
+kind: Service
+metadata:
+  name: proper-mcp-service
+  namespace: mcp-system
+  labels:
+    app: mcp-server
+spec:
+  selector:
+    app: mcp-server
+  ports:
+    - port: 8080
+      targetPort: 8080
+      appProtocol: kgateway.dev/mcp

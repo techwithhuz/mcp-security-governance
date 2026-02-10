@@ -1,0 +1,152 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mcpgovernancepolicies.governance.mcp.io
+spec:
+  group: governance.mcp.io
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                requireAgentGateway:
+                  type: boolean
+                  default: true
+                  description: "Enforces that all MCP servers must route through agentgateway"
+                requireCORS:
+                  type: boolean
+                  default: true
+                  description: "Enforces CORS policy on all MCP endpoints"
+                requireJWTAuth:
+                  type: boolean
+                  default: true
+                  description: "Enforces JWT authentication on all MCP endpoints"
+                requireRBAC:
+                  type: boolean
+                  default: true
+                  description: "Enforces CEL-based RBAC rules on MCP tool access"
+                requirePromptGuard:
+                  type: boolean
+                  default: false
+                  description: "Enforces prompt guard policies on AI backends"
+                requireTLS:
+                  type: boolean
+                  default: true
+                  description: "Enforces TLS on all MCP connections"
+                requireRateLimit:
+                  type: boolean
+                  default: false
+                  description: "Enforces rate limiting on MCP endpoints"
+                maxToolsWarning:
+                  type: integer
+                  default: 10
+                  description: "Warning threshold for number of tools per MCP server (0 = disabled)"
+                maxToolsCritical:
+                  type: integer
+                  default: 15
+                  description: "Critical threshold for number of tools per MCP server (0 = disabled)"
+                scoringWeights:
+                  type: object
+                  properties:
+                    agentGatewayIntegration:
+                      type: integer
+                      default: 25
+                    authentication:
+                      type: integer
+                      default: 20
+                    authorization:
+                      type: integer
+                      default: 15
+                    corsPolicy:
+                      type: integer
+                      default: 10
+                    tlsEncryption:
+                      type: integer
+                      default: 10
+                    promptGuard:
+                      type: integer
+                      default: 10
+                    rateLimit:
+                      type: integer
+                      default: 5
+                    toolScope:
+                      type: integer
+                      default: 5
+                severityPenalties:
+                  type: object
+                  description: "Point deductions per finding severity level"
+                  properties:
+                    critical:
+                      type: integer
+                      default: 40
+                      description: "Points deducted per Critical finding"
+                    high:
+                      type: integer
+                      default: 25
+                      description: "Points deducted per High finding"
+                    medium:
+                      type: integer
+                      default: 15
+                      description: "Points deducted per Medium finding"
+                    low:
+                      type: integer
+                      default: 5
+                      description: "Points deducted per Low finding"
+                targetNamespaces:
+                  type: array
+                  items:
+                    type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                clusterScore:
+                  type: integer
+                lastEvaluationTime:
+                  type: string
+                  format: date-time
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Score
+          type: integer
+          jsonPath: .status.clusterScore
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Last Evaluated
+          type: string
+          jsonPath: .status.lastEvaluationTime
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+  scope: Cluster
+  names:
+    plural: mcpgovernancepolicies
+    singular: mcpgovernancepolicy
+    kind: MCPGovernancePolicy
+    shortNames:
+      - mgp
