@@ -28,12 +28,13 @@ spec:
     high: 25
     medium: 15
     low: 5
-  targetNamespaces:
-    - mcp-system
-    - agents
-    - kagent
-    - agentgateway-system
-    - default
+  # targetNamespaces is empty – scan all namespaces by default
+  targetNamespaces: []
+  excludeNamespaces:
+    - kube-system
+    - kube-public
+    - kube-node-lease
+    - local-path-storage
 ---
 # Sample GovernanceEvaluation trigger
 apiVersion: governance.mcp.io/v1alpha1
