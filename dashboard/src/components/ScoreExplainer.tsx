@@ -1,6 +1,21 @@
 'use client';
 
+import { useState } from 'react';
 import { Info, CheckCircle2, AlertTriangle, AlertCircle, XCircle } from 'lucide-react';
+import CategoryScoreModal from './CategoryScoreModal';
+
+interface Finding {
+  id: string;
+  severity: string;
+  category: string;
+  title: string;
+  description: string;
+  resource?: string;
+  resourceRef?: string;
+  namespace: string;
+  impact: string;
+  remediation: string;
+}
 
 interface ScoreCategory {
   category: string;
@@ -15,7 +30,21 @@ interface ScoreExplainerProps {
   grade: string;
   categories: ScoreCategory[];
   explanation: string;
+  findings?: Finding[];
+  severityPenalties?: { Critical: number; High: number; Medium: number; Low: number };
 }
+
+// Map display category names to finding category values
+const categoryToFindingCategory: Record<string, string[]> = {
+  'AgentGateway Compliance': ['AgentGateway'],
+  'Authentication': ['Authentication'],
+  'Authorization': ['Authorization'],
+  'CORS': ['CORS'],
+  'TLS': ['TLS'],
+  'Prompt Guard': ['PromptGuard'],
+  'Rate Limit': ['RateLimit'],
+  'Tool Scope': ['ToolScope'],
+};
 
 const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; bg: string; border: string }> = {
   passing: { icon: CheckCircle2, color: '#22c55e', bg: 'bg-green-500/10', border: 'border-green-500/30' },
@@ -24,8 +53,18 @@ const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; b
   critical: { icon: XCircle, color: '#ef4444', bg: 'bg-red-500/10', border: 'border-red-500/30' },
 };
 
-export default function ScoreExplainer({ score, grade, categories, explanation }: ScoreExplainerProps) {
+export default function ScoreExplainer({ score, grade, categories, explanation, findings = [], severityPenalties }: ScoreExplainerProps) {
   const totalWeighted = categories.reduce((sum, c) => sum + c.weighted, 0);
+  const [selectedCategory, setSelectedCategory] = useState<ScoreCategory | null>(null);
+
+  // Default penalties if not provided (matches Go defaults)
+  const penalties = severityPenalties || { Critical: 40, High: 25, Medium: 15, Low: 5 };
+
+  // Get findings for a specific category
+  const getFindingsForCategory = (cat: ScoreCategory): Finding[] => {
+    const findingCategories = categoryToFindingCategory[cat.category] || [];
+    return findings.filter(f => findingCategories.includes(f.category));
+  };
 
   return (
     <div className="bg-gov-surface rounded-2xl border border-gov-border p-5 card-hover">
@@ -55,11 +94,14 @@ export default function ScoreExplainer({ score, grade, categories, explanation }
         {categories.map((cat) => {
           const config = statusConfig[cat.status] || statusConfig.critical;
           const Icon = config.icon;
+          const catFindings = getFindingsForCategory(cat);
 
           return (
             <div
               key={cat.category}
-              className={`grid grid-cols-12 gap-2 items-center px-3 py-3 rounded-xl border transition-all hover:scale-[1.01] ${config.bg} ${config.border}`}
+              onClick={() => setSelectedCategory(cat)}
+              className={`grid grid-cols-12 gap-2 items-center px-3 py-3 rounded-xl border transition-all hover:scale-[1.01] cursor-pointer ${config.bg} ${config.border}`}
+              title={`Click to see how this score is calculated (${catFindings.length} finding${catFindings.length !== 1 ? 's' : ''})`}
             >
               {/* Category name */}
               <div className="col-span-4 flex items-center gap-2">
@@ -169,6 +211,22 @@ export default function ScoreExplainer({ score, grade, categories, explanation }
           <span>100</span>
         </div>
       </div>
+
+      {/* Click hint */}
+      <div className="mt-4 flex items-center gap-2 text-xs text-gov-text-3">
+        <Info size={12} />
+        <span>Click on any category row above to see detailed score calculation and findings</span>
+      </div>
+
+      {/* Category Score Modal */}
+      {selectedCategory && (
+        <CategoryScoreModal
+          category={selectedCategory}
+          findings={getFindingsForCategory(selectedCategory)}
+          severityPenalties={penalties}
+          onClose={() => setSelectedCategory(null)}
+        />
+      )}
     </div>
   );
 }
