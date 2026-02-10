@@ -117,6 +117,8 @@ governancePolicy:
       - mcp-system
       - agents
       - default
+      - kagent
+      - agentgateway-system
 
 # -- Image pull secrets (for private registries)
 imagePullSecrets: []
