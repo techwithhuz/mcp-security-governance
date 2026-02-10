@@ -1,7 +1,7 @@
 'use client';
 
 import { TrendPoint } from '@/lib/types';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart, CartesianGrid } from 'recharts';
+import { XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart, CartesianGrid } from 'recharts';
 
 interface TrendChartProps {
   trends: TrendPoint[];
