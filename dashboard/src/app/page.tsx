@@ -12,7 +12,7 @@ import ScoreExplainer from '@/components/ScoreExplainer';
 import ResourceInventory from '@/components/ResourceInventory';
 
 interface DashboardData {
-  score: { score: number; grade: string; phase: string; categories: any[]; explanation: string };
+  score: { score: number; grade: string; phase: string; categories: any[]; explanation: string; severityPenalties?: { Critical: number; High: number; Medium: number; Low: number } };
   findings: { findings: any[]; total: number; bySeverity: Record<string, number> };
   resources: any;
   breakdown: any;
@@ -293,6 +293,8 @@ export default function Dashboard() {
               grade={data.score.grade}
               categories={data.score.categories || []}
               explanation={data.score.explanation || ''}
+              findings={data.findings.findings || []}
+              severityPenalties={data.score.severityPenalties}
             />
 
             {/* Failing Resources Quick View */}

@@ -228,6 +228,12 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 		"phase":      getPhase(snap.result.Score),
 		"timestamp":  snap.result.Timestamp,
 		"categories": cats,
+		"severityPenalties": map[string]int{
+			"Critical": snap.policy.SeverityPenalties.Critical,
+			"High":     snap.policy.SeverityPenalties.High,
+			"Medium":   snap.policy.SeverityPenalties.Medium,
+			"Low":      snap.policy.SeverityPenalties.Low,
+		},
 		"explanation": fmt.Sprintf(
 			"Score is a weighted average of %d governance categories. Each category is scored 0-100 based on findings (Critical: -%dpts, High: -%dpts, Medium: -%dpts, Low: -%dpts). The final score %d/100 = Grade %s.",
 			len(cats), snap.policy.SeverityPenalties.Critical, snap.policy.SeverityPenalties.High, snap.policy.SeverityPenalties.Medium, snap.policy.SeverityPenalties.Low, snap.result.Score, getGrade(snap.result.Score)),
