@@ -725,6 +725,15 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 		policy.SeverityPenalties = evaluator.DefaultSeverityPenalties()
 	}
 
+	// Parse target namespaces
+	if nsList, ok := spec["targetNamespaces"].([]interface{}); ok {
+		for _, ns := range nsList {
+			if s, ok := ns.(string); ok {
+				policy.TargetNamespaces = append(policy.TargetNamespaces, s)
+			}
+		}
+	}
+
 	log.Printf("[discovery] Loaded MCPGovernancePolicy: %s/%s", policyObj.GetNamespace(), policyObj.GetName())
 	return policy
 }

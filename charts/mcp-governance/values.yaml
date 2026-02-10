@@ -1,5 +1,6 @@
 # -- Global settings
-namespace: mcp-governance
+# -- Whether to create the Namespace resource (set false when using --create-namespace)
+createNamespace: false
 
 # -- Controller settings
 controller:
@@ -14,6 +15,11 @@ controller:
     pullPolicy: Never
   # -- Controller API port
   port: 8090
+  service:
+    # -- Service type for the controller (ClusterIP, NodePort, or LoadBalancer)
+    type: ClusterIP
+    # -- NodePort to expose when type is NodePort (null for auto-assign)
+    nodePort: null
   resources:
     requests:
       cpu: 50m
@@ -60,13 +66,18 @@ dashboard:
     type: NodePort
     # -- NodePort to expose (set to null to auto-assign)
     nodePort: 30000
-  # -- API URL the dashboard uses to reach the controller
-  apiUrl: "http://localhost:8090"
+  # -- Controller API URL for the dashboard's server-side proxy (CONTROLLER_API_URL).
+  # -- The dashboard proxies browser requests via Next.js rewrites, so this is
+  # -- a pod-to-pod URL, not a browser-facing one.
+  # -- Leave empty to auto-detect using in-cluster DNS
+  # -- (http://mcp-governance-controller.<namespace>.svc.cluster.local:<port>).
+  # -- Override for local dev, e.g. "http://localhost:8090".
+  apiUrl: ""
 
 # -- CRD installation
+# -- Governance CRDs (MCPGovernancePolicy, GovernanceEvaluation) are installed
+# -- automatically from the chart's crds/ directory. To skip, use: --skip-crds
 crds:
-  # -- Install governance CRDs (MCPGovernancePolicy, GovernanceEvaluation)
-  install: true
   # -- Install external stub CRDs for demo (AgentGateway, Kagent)
   installExternal: false
 

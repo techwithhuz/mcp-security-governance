@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Image from 'next/image';
-import { Shield, RefreshCw, Activity, Clock, AlertTriangle, CheckCircle2, Wifi, WifiOff, Server, Bot, ChevronRight } from 'lucide-react';
+import { Shield, RefreshCw, Activity, Clock, AlertTriangle, CheckCircle2, Wifi, WifiOff, Server, ChevronRight } from 'lucide-react';
 import ScoreGauge from '@/components/ScoreGauge';
 import ResourceCards from '@/components/ResourceCards';
 import FindingsTable from '@/components/FindingsTable';
@@ -20,8 +20,6 @@ interface DashboardData {
   resourceDetail: { resources: any[]; total: number };
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090';
-
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,12 +33,12 @@ export default function Dashboard() {
     try {
       setRefreshing(true);
       const [score, findings, resources, breakdown, trends, resourceDetail] = await Promise.all([
-        fetch(`${API_BASE}/api/governance/score`).then(r => r.json()),
-        fetch(`${API_BASE}/api/governance/findings`).then(r => r.json()),
-        fetch(`${API_BASE}/api/governance/resources`).then(r => r.json()),
-        fetch(`${API_BASE}/api/governance/breakdown`).then(r => r.json()),
-        fetch(`${API_BASE}/api/governance/trends`).then(r => r.json()),
-        fetch(`${API_BASE}/api/governance/resources/detail`).then(r => r.json()),
+        fetch('/api/governance/score').then(r => r.json()),
+        fetch('/api/governance/findings').then(r => r.json()),
+        fetch('/api/governance/resources').then(r => r.json()),
+        fetch('/api/governance/breakdown').then(r => r.json()),
+        fetch('/api/governance/trends').then(r => r.json()),
+        fetch('/api/governance/resources/detail').then(r => r.json()),
       ]);
 
       setData({ score, findings, resources, breakdown, trends, resourceDetail });
@@ -90,7 +88,7 @@ export default function Dashboard() {
           <h2 className="text-xl font-bold text-gov-text mb-2">Connection Failed</h2>
           <p className="text-gov-text-3 text-sm mb-4">{error}</p>
           <p className="text-gov-text-3 text-xs mb-6">
-            Make sure the governance API server is running on {API_BASE}
+            Make sure the governance controller is running and reachable.
           </p>
           <button
             onClick={fetchData}

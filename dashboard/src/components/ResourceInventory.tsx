@@ -3,9 +3,9 @@
 import { useState } from 'react';
 import {
   Shield, Server, Route, Bot, Plug, Globe, ChevronDown, ChevronUp,
-  CheckCircle2, AlertTriangle, AlertCircle, XCircle, Box, Layers
+  CheckCircle2, AlertTriangle, Box, Layers
 } from 'lucide-react';
-import { ResourceDetail, Finding } from '@/lib/types';
+import { ResourceDetail } from '@/lib/types';
 
 interface ResourceInventoryProps {
   resources: ResourceDetail[];

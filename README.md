@@ -833,7 +833,7 @@ status:
 
 ---
 
-## � CI/CD & Releasing
+## CI/CD & Releasing
 
 This project includes GitHub Actions workflows for continuous integration and automated releases.
 
@@ -929,7 +929,7 @@ And add `REGISTRY_USERNAME` / `REGISTRY_PASSWORD` secrets to your repository set
 
 ---
 
-## �🔥 Troubleshooting
+##  Troubleshooting
 
 ### Dashboard shows "Connecting to governance controller..."
 

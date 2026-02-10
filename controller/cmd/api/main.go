@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/discovery"
@@ -14,6 +15,7 @@ import (
 )
 
 var (
+	stateMu      sync.RWMutex
 	lastResult   *evaluator.EvaluationResult
 	lastCluster  *evaluator.ClusterState
 	currentState *evaluator.ClusterState
@@ -42,21 +44,31 @@ func main() {
 	currentState = doDiscovery()
 	policy = loadPolicy()
 	lastCluster = currentState
-	lastResult = evaluator.Evaluate(currentState, policy)
-	log.Printf("[governance] Initial evaluation. Score: %d, Findings: %d (Policy: AgentGW=%v, CORS=%v, JWT=%v, RBAC=%v, TLS=%v, PromptGuard=%v, RateLimit=%v)", 
+	lastResult = evaluator.Evaluate(currentState.FilterByNamespaces(policy.TargetNamespaces), policy)
+	recordTrendPoint(lastResult)
+	log.Printf("[governance] Initial evaluation. Score: %d, Findings: %d (Policy: AgentGW=%v, CORS=%v, JWT=%v, RBAC=%v, TLS=%v, PromptGuard=%v, RateLimit=%v, TargetNS=%v)", 
 		lastResult.Score, len(lastResult.Findings),
 		policy.RequireAgentGateway, policy.RequireCORS, policy.RequireJWTAuth, 
-		policy.RequireRBAC, policy.RequireTLS, policy.RequirePromptGuard, policy.RequireRateLimit)
+		policy.RequireRBAC, policy.RequireTLS, policy.RequirePromptGuard, policy.RequireRateLimit,
+		policy.TargetNamespaces)
 
 	// Periodic re-evaluation
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		for range ticker.C {
-			currentState = doDiscovery()
-			policy = loadPolicy() // Reload policy in case it changed
-			lastCluster = currentState
-			lastResult = evaluator.Evaluate(currentState, policy)
-			log.Printf("[governance] Re-evaluated cluster. Score: %d, Findings: %d", lastResult.Score, len(lastResult.Findings))
+			cs := doDiscovery()
+			p := loadPolicy()
+			res := evaluator.Evaluate(cs.FilterByNamespaces(p.TargetNamespaces), p)
+
+			stateMu.Lock()
+			currentState = cs
+			policy = p
+			lastCluster = cs
+			lastResult = res
+			stateMu.Unlock()
+
+			recordTrendPoint(res)
+			log.Printf("[governance] Re-evaluated cluster. Score: %d, Findings: %d", res.Score, len(res.Findings))
 		}
 	}()
 
@@ -99,6 +111,24 @@ func jsonResponse(w http.ResponseWriter, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
+// stateSnapshot holds an immutable copy of shared state for safe use in handlers.
+type stateSnapshot struct {
+	result  *evaluator.EvaluationResult
+	cluster *evaluator.ClusterState
+	policy  evaluator.Policy
+}
+
+// getSnapshot returns a consistent read of the shared state.
+func getSnapshot() stateSnapshot {
+	stateMu.RLock()
+	defer stateMu.RUnlock()
+	return stateSnapshot{
+		result:  lastResult,
+		cluster: lastCluster,
+		policy:  policy,
+	}
+}
+
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]string{"status": "healthy", "version": "0.1.0"})
 }
@@ -132,7 +162,8 @@ func getPhase(score int) string {
 }
 
 func handleScore(w http.ResponseWriter, r *http.Request) {
-	if lastResult == nil {
+	snap := getSnapshot()
+	if snap.result == nil {
 		jsonResponse(w, map[string]interface{}{"score": 0, "grade": "F", "phase": "Unknown"})
 		return
 	}
@@ -144,43 +175,43 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 		Status   string  `json:"status"`
 	}
 	// Build explanation of how each category contributes
-	pw := policy.Weights
+	pw := snap.policy.Weights
 	totalWeight := 0
 	var cats []categoryDetail
 	
-	bd := lastResult.ScoreBreakdown
+	bd := snap.result.ScoreBreakdown
 	
-	if policy.RequireAgentGateway {
+	if snap.policy.RequireAgentGateway {
 		totalWeight += pw.AgentGatewayIntegration
-		cats = append(cats, categoryDetail{"AgentGateway Compliance", bd.AgentGatewayScore, pw.AgentGatewayIntegration, float64(bd.AgentGatewayScore*pw.AgentGatewayIntegration) / float64(pw.AgentGatewayIntegration), statusLabel(bd.AgentGatewayScore)})
+		cats = append(cats, categoryDetail{"AgentGateway Compliance", bd.AgentGatewayScore, pw.AgentGatewayIntegration, 0, statusLabel(bd.AgentGatewayScore)})
 	}
-	if policy.RequireJWTAuth {
+	if snap.policy.RequireJWTAuth {
 		totalWeight += pw.Authentication
-		cats = append(cats, categoryDetail{"Authentication", bd.AuthenticationScore, pw.Authentication, float64(bd.AuthenticationScore*pw.Authentication) / float64(pw.Authentication), statusLabel(bd.AuthenticationScore)})
+		cats = append(cats, categoryDetail{"Authentication", bd.AuthenticationScore, pw.Authentication, 0, statusLabel(bd.AuthenticationScore)})
 	}
-	if policy.RequireRBAC {
+	if snap.policy.RequireRBAC {
 		totalWeight += pw.Authorization
-		cats = append(cats, categoryDetail{"Authorization", bd.AuthorizationScore, pw.Authorization, float64(bd.AuthorizationScore*pw.Authorization) / float64(pw.Authorization), statusLabel(bd.AuthorizationScore)})
+		cats = append(cats, categoryDetail{"Authorization", bd.AuthorizationScore, pw.Authorization, 0, statusLabel(bd.AuthorizationScore)})
 	}
-	if policy.RequireCORS {
+	if snap.policy.RequireCORS {
 		totalWeight += pw.CORSPolicy
-		cats = append(cats, categoryDetail{"CORS", bd.CORSScore, pw.CORSPolicy, float64(bd.CORSScore*pw.CORSPolicy) / float64(pw.CORSPolicy), statusLabel(bd.CORSScore)})
+		cats = append(cats, categoryDetail{"CORS", bd.CORSScore, pw.CORSPolicy, 0, statusLabel(bd.CORSScore)})
 	}
-	if policy.RequireTLS {
+	if snap.policy.RequireTLS {
 		totalWeight += pw.TLSEncryption
-		cats = append(cats, categoryDetail{"TLS", bd.TLSScore, pw.TLSEncryption, float64(bd.TLSScore*pw.TLSEncryption) / float64(pw.TLSEncryption), statusLabel(bd.TLSScore)})
+		cats = append(cats, categoryDetail{"TLS", bd.TLSScore, pw.TLSEncryption, 0, statusLabel(bd.TLSScore)})
 	}
-	if policy.RequirePromptGuard {
+	if snap.policy.RequirePromptGuard {
 		totalWeight += pw.PromptGuard
-		cats = append(cats, categoryDetail{"Prompt Guard", bd.PromptGuardScore, pw.PromptGuard, float64(bd.PromptGuardScore*pw.PromptGuard) / float64(pw.PromptGuard), statusLabel(bd.PromptGuardScore)})
+		cats = append(cats, categoryDetail{"Prompt Guard", bd.PromptGuardScore, pw.PromptGuard, 0, statusLabel(bd.PromptGuardScore)})
 	}
-	if policy.RequireRateLimit {
+	if snap.policy.RequireRateLimit {
 		totalWeight += pw.RateLimit
-		cats = append(cats, categoryDetail{"Rate Limit", bd.RateLimitScore, pw.RateLimit, float64(bd.RateLimitScore*pw.RateLimit) / float64(pw.RateLimit), statusLabel(bd.RateLimitScore)})
+		cats = append(cats, categoryDetail{"Rate Limit", bd.RateLimitScore, pw.RateLimit, 0, statusLabel(bd.RateLimitScore)})
 	}
-	if policy.MaxToolsWarning > 0 || policy.MaxToolsCritical > 0 {
+	if snap.policy.MaxToolsWarning > 0 || snap.policy.MaxToolsCritical > 0 {
 		totalWeight += pw.ToolScope
-		cats = append(cats, categoryDetail{"Tool Scope", bd.ToolScopeScore, pw.ToolScope, float64(bd.ToolScopeScore*pw.ToolScope) / float64(pw.ToolScope), statusLabel(bd.ToolScopeScore)})
+		cats = append(cats, categoryDetail{"Tool Scope", bd.ToolScopeScore, pw.ToolScope, 0, statusLabel(bd.ToolScopeScore)})
 	}
 	
 	if totalWeight == 0 {
@@ -192,14 +223,14 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 		cats[i].Weighted = float64(cats[i].Score*cats[i].Weight) / float64(totalWeight)
 	}
 	jsonResponse(w, map[string]interface{}{
-		"score":      lastResult.Score,
-		"grade":      getGrade(lastResult.Score),
-		"phase":      getPhase(lastResult.Score),
-		"timestamp":  lastResult.Timestamp,
+		"score":      snap.result.Score,
+		"grade":      getGrade(snap.result.Score),
+		"phase":      getPhase(snap.result.Score),
+		"timestamp":  snap.result.Timestamp,
 		"categories": cats,
 		"explanation": fmt.Sprintf(
 			"Score is a weighted average of %d governance categories. Each category is scored 0-100 based on findings (Critical: -%dpts, High: -%dpts, Medium: -%dpts, Low: -%dpts). The final score %d/100 = Grade %s.",
-			len(cats), policy.SeverityPenalties.Critical, policy.SeverityPenalties.High, policy.SeverityPenalties.Medium, policy.SeverityPenalties.Low, lastResult.Score, getGrade(lastResult.Score)),
+			len(cats), snap.policy.SeverityPenalties.Critical, snap.policy.SeverityPenalties.High, snap.policy.SeverityPenalties.Medium, snap.policy.SeverityPenalties.Low, snap.result.Score, getGrade(snap.result.Score)),
 	})
 }
 
@@ -217,7 +248,8 @@ func statusLabel(score int) string {
 }
 
 func handleFindings(w http.ResponseWriter, r *http.Request) {
-	if lastResult == nil {
+	snap := getSnapshot()
+	if snap.result == nil {
 		jsonResponse(w, map[string]interface{}{
 			"findings":   []evaluator.Finding{},
 			"total":      0,
@@ -226,72 +258,76 @@ func handleFindings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bySeverity := map[string]int{}
-	for _, f := range lastResult.Findings {
+	for _, f := range snap.result.Findings {
 		bySeverity[f.Severity]++
 	}
 	jsonResponse(w, map[string]interface{}{
-		"findings":   lastResult.Findings,
-		"total":      len(lastResult.Findings),
+		"findings":   snap.result.Findings,
+		"total":      len(snap.result.Findings),
 		"bySeverity": bySeverity,
 	})
 }
 
 func handleResources(w http.ResponseWriter, r *http.Request) {
-	if lastResult == nil {
+	snap := getSnapshot()
+	if snap.result == nil {
 		jsonResponse(w, evaluator.ResourceSummary{})
 		return
 	}
-	jsonResponse(w, lastResult.ResourceSummary)
+	jsonResponse(w, snap.result.ResourceSummary)
 }
 
 func handleNamespaces(w http.ResponseWriter, r *http.Request) {
-	if lastResult == nil {
+	snap := getSnapshot()
+	if snap.result == nil {
 		jsonResponse(w, map[string]interface{}{"namespaces": []evaluator.NamespaceScore{}})
 		return
 	}
-	jsonResponse(w, map[string]interface{}{"namespaces": lastResult.NamespaceScores})
+	jsonResponse(w, map[string]interface{}{"namespaces": snap.result.NamespaceScores})
 }
 
 func handleBreakdown(w http.ResponseWriter, r *http.Request) {
-	if lastResult == nil {
+	snap := getSnapshot()
+	if snap.result == nil {
 		jsonResponse(w, map[string]interface{}{})
 		return
 	}
-	bd := lastResult.ScoreBreakdown
+	bd := snap.result.ScoreBreakdown
 	result := map[string]int{}
-	if policy.RequireAgentGateway {
+	if snap.policy.RequireAgentGateway {
 		result["agentGatewayScore"] = bd.AgentGatewayScore
 	}
-	if policy.RequireJWTAuth {
+	if snap.policy.RequireJWTAuth {
 		result["authenticationScore"] = bd.AuthenticationScore
 	}
-	if policy.RequireRBAC {
+	if snap.policy.RequireRBAC {
 		result["authorizationScore"] = bd.AuthorizationScore
 	}
-	if policy.RequireCORS {
+	if snap.policy.RequireCORS {
 		result["corsScore"] = bd.CORSScore
 	}
-	if policy.RequireTLS {
+	if snap.policy.RequireTLS {
 		result["tlsScore"] = bd.TLSScore
 	}
-	if policy.RequirePromptGuard {
+	if snap.policy.RequirePromptGuard {
 		result["promptGuardScore"] = bd.PromptGuardScore
 	}
-	if policy.RequireRateLimit {
+	if snap.policy.RequireRateLimit {
 		result["rateLimitScore"] = bd.RateLimitScore
 	}
-	if policy.MaxToolsWarning > 0 || policy.MaxToolsCritical > 0 {
+	if snap.policy.MaxToolsWarning > 0 || snap.policy.MaxToolsCritical > 0 {
 		result["toolScopeScore"] = bd.ToolScopeScore
 	}
 	jsonResponse(w, result)
 }
 
 func handleFullEvaluation(w http.ResponseWriter, r *http.Request) {
-	if lastResult == nil {
+	snap := getSnapshot()
+	if snap.result == nil {
 		http.Error(w, "No evaluation available", http.StatusServiceUnavailable)
 		return
 	}
-	jsonResponse(w, lastResult)
+	jsonResponse(w, snap.result)
 }
 
 // ResourceDetail groups findings per individual resource
@@ -310,7 +346,8 @@ type ResourceDetail struct {
 }
 
 func handleResourceDetail(w http.ResponseWriter, r *http.Request) {
-	if lastResult == nil || lastCluster == nil {
+	snap := getSnapshot()
+	if snap.result == nil || snap.cluster == nil {
 		jsonResponse(w, map[string]interface{}{"resources": []ResourceDetail{}})
 		return
 	}
@@ -318,7 +355,7 @@ func handleResourceDetail(w http.ResponseWriter, r *http.Request) {
 	// Build a map of resourceRef -> findings
 	findingsMap := map[string][]evaluator.Finding{}
 	clusterFindings := []evaluator.Finding{} // findings not tied to a specific resource
-	for _, f := range lastResult.Findings {
+	for _, f := range snap.result.Findings {
 		if f.ResourceRef != "" {
 			findingsMap[f.ResourceRef] = append(findingsMap[f.ResourceRef], f)
 		} else {
@@ -329,57 +366,57 @@ func handleResourceDetail(w http.ResponseWriter, r *http.Request) {
 	var resources []ResourceDetail
 
 	// AgentGateway Backends
-	for _, b := range lastCluster.AgentgatewayBackends {
+	for _, b := range snap.cluster.AgentgatewayBackends {
 		ref := fmt.Sprintf("AgentgatewayBackend/%s/%s", b.Namespace, b.Name)
-		rd := buildResourceDetail(ref, "AgentgatewayBackend", b.Name, b.Namespace, findingsMap[ref])
+		rd := buildResourceDetail(ref, "AgentgatewayBackend", b.Name, b.Namespace, findingsMap[ref], snap.policy)
 		resources = append(resources, rd)
 	}
 
 	// AgentGateway Policies
-	for _, p := range lastCluster.AgentgatewayPolicies {
+	for _, p := range snap.cluster.AgentgatewayPolicies {
 		ref := fmt.Sprintf("AgentgatewayPolicy/%s/%s", p.Namespace, p.Name)
-		rd := buildResourceDetail(ref, "AgentgatewayPolicy", p.Name, p.Namespace, findingsMap[ref])
+		rd := buildResourceDetail(ref, "AgentgatewayPolicy", p.Name, p.Namespace, findingsMap[ref], snap.policy)
 		resources = append(resources, rd)
 	}
 
 	// Gateways
-	for _, g := range lastCluster.Gateways {
+	for _, g := range snap.cluster.Gateways {
 		ref := fmt.Sprintf("Gateway/%s/%s", g.Namespace, g.Name)
-		rd := buildResourceDetail(ref, "Gateway", g.Name, g.Namespace, findingsMap[ref])
+		rd := buildResourceDetail(ref, "Gateway", g.Name, g.Namespace, findingsMap[ref], snap.policy)
 		resources = append(resources, rd)
 	}
 
 	// HTTPRoutes
-	for _, h := range lastCluster.HTTPRoutes {
+	for _, h := range snap.cluster.HTTPRoutes {
 		ref := fmt.Sprintf("HTTPRoute/%s/%s", h.Namespace, h.Name)
-		rd := buildResourceDetail(ref, "HTTPRoute", h.Name, h.Namespace, findingsMap[ref])
+		rd := buildResourceDetail(ref, "HTTPRoute", h.Name, h.Namespace, findingsMap[ref], snap.policy)
 		resources = append(resources, rd)
 	}
 
 	// Kagent Agents
-	for _, a := range lastCluster.KagentAgents {
+	for _, a := range snap.cluster.KagentAgents {
 		ref := fmt.Sprintf("Agent/%s/%s", a.Namespace, a.Name)
-		rd := buildResourceDetail(ref, "Agent", a.Name, a.Namespace, findingsMap[ref])
+		rd := buildResourceDetail(ref, "Agent", a.Name, a.Namespace, findingsMap[ref], snap.policy)
 		resources = append(resources, rd)
 	}
 
 	// Kagent MCPServers
-	for _, m := range lastCluster.KagentMCPServers {
+	for _, m := range snap.cluster.KagentMCPServers {
 		ref := fmt.Sprintf("MCPServer/%s/%s", m.Namespace, m.Name)
-		rd := buildResourceDetail(ref, "MCPServer", m.Name, m.Namespace, findingsMap[ref])
+		rd := buildResourceDetail(ref, "MCPServer", m.Name, m.Namespace, findingsMap[ref], snap.policy)
 		resources = append(resources, rd)
 	}
 
 	// Kagent RemoteMCPServers
-	for _, rm := range lastCluster.KagentRemoteMCPServers {
+	for _, rm := range snap.cluster.KagentRemoteMCPServers {
 		ref := fmt.Sprintf("RemoteMCPServer/%s/%s", rm.Namespace, rm.Name)
-		rd := buildResourceDetail(ref, "RemoteMCPServer", rm.Name, rm.Namespace, findingsMap[ref])
+		rd := buildResourceDetail(ref, "RemoteMCPServer", rm.Name, rm.Namespace, findingsMap[ref], snap.policy)
 		resources = append(resources, rd)
 	}
 
 	// Add cluster-wide findings as a virtual resource
 	if len(clusterFindings) > 0 {
-		rd := buildResourceDetail("cluster-wide", "Cluster", "cluster-wide-policies", "", clusterFindings)
+		rd := buildResourceDetail("cluster-wide", "Cluster", "cluster-wide-policies", "", clusterFindings, snap.policy)
 		resources = append(resources, rd)
 	}
 
@@ -389,7 +426,7 @@ func handleResourceDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func buildResourceDetail(ref, kind, name, namespace string, findings []evaluator.Finding) ResourceDetail {
+func buildResourceDetail(ref, kind, name, namespace string, findings []evaluator.Finding, p evaluator.Policy) ResourceDetail {
 	rd := ResourceDetail{
 		ResourceRef: ref,
 		Kind:        kind,
@@ -424,11 +461,11 @@ func buildResourceDetail(ref, kind, name, namespace string, findings []evaluator
 		for _, f := range findings {
 			switch f.Severity {
 			case "High":
-				rd.Score -= policy.SeverityPenalties.High
+				rd.Score -= p.SeverityPenalties.High
 			case "Medium":
-				rd.Score -= policy.SeverityPenalties.Medium
+				rd.Score -= p.SeverityPenalties.Medium
 			case "Low":
-				rd.Score -= policy.SeverityPenalties.Low
+				rd.Score -= p.SeverityPenalties.Low
 			}
 		}
 		if rd.Score < 0 {
@@ -452,7 +489,10 @@ func buildResourceDetail(ref, kind, name, namespace string, findings []evaluator
 }
 
 // Trend data - in production this would use persistent storage
-var trendHistory []TrendPoint
+var (
+	trendMu      sync.RWMutex
+	trendHistory []TrendPoint
+)
 
 type TrendPoint struct {
 	Timestamp string `json:"timestamp"`
@@ -464,37 +504,51 @@ type TrendPoint struct {
 	Low       int    `json:"low"`
 }
 
-func handleTrends(w http.ResponseWriter, r *http.Request) {
-	if lastResult != nil {
-		critical, high, medium, low := 0, 0, 0, 0
-		for _, f := range lastResult.Findings {
-			switch f.Severity {
-			case "Critical":
-				critical++
-			case "High":
-				high++
-			case "Medium":
-				medium++
-			case "Low":
-				low++
-			}
-		}
-		trendHistory = append(trendHistory, TrendPoint{
-			Timestamp: lastResult.Timestamp.Format(time.RFC3339),
-			Score:     lastResult.Score,
-			Findings:  len(lastResult.Findings),
-			Critical:  critical,
-			High:      high,
-			Medium:    medium,
-			Low:       low,
-		})
-
-		// Keep last 100 trend points
-		if len(trendHistory) > 100 {
-			trendHistory = trendHistory[len(trendHistory)-100:]
+// recordTrendPoint appends a trend point from an evaluation result.
+// Called only from the initial setup and the ticker goroutine — never from HTTP handlers.
+func recordTrendPoint(res *evaluator.EvaluationResult) {
+	if res == nil {
+		return
+	}
+	critical, high, medium, low := 0, 0, 0, 0
+	for _, f := range res.Findings {
+		switch f.Severity {
+		case "Critical":
+			critical++
+		case "High":
+			high++
+		case "Medium":
+			medium++
+		case "Low":
+			low++
 		}
 	}
-	jsonResponse(w, map[string]interface{}{"trends": trendHistory})
+
+	trendMu.Lock()
+	trendHistory = append(trendHistory, TrendPoint{
+		Timestamp: res.Timestamp.Format(time.RFC3339),
+		Score:     res.Score,
+		Findings:  len(res.Findings),
+		Critical:  critical,
+		High:      high,
+		Medium:    medium,
+		Low:       low,
+	})
+
+	// Keep last 100 trend points
+	if len(trendHistory) > 100 {
+		trendHistory = trendHistory[len(trendHistory)-100:]
+	}
+	trendMu.Unlock()
+}
+
+func handleTrends(w http.ResponseWriter, r *http.Request) {
+	trendMu.RLock()
+	trends := make([]TrendPoint, len(trendHistory))
+	copy(trends, trendHistory)
+	trendMu.RUnlock()
+
+	jsonResponse(w, map[string]interface{}{"trends": trends})
 }
 
 // doDiscovery uses real K8s discovery if available, otherwise falls back to simulated data

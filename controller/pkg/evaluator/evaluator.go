@@ -44,6 +44,71 @@ type ClusterState struct {
 	Namespaces []string
 }
 
+// FilterByNamespaces returns a new ClusterState containing only resources whose
+// namespace is in the given list. Cluster-scoped resources (Gateways) are kept
+// as-is. If targetNamespaces is empty, the original state is returned unchanged.
+func (s *ClusterState) FilterByNamespaces(targetNamespaces []string) *ClusterState {
+	if len(targetNamespaces) == 0 {
+		return s
+	}
+
+	allowed := make(map[string]bool, len(targetNamespaces))
+	for _, ns := range targetNamespaces {
+		allowed[ns] = true
+	}
+
+	filtered := &ClusterState{
+		// Keep cluster-scoped resources
+		Gateways: s.Gateways,
+	}
+
+	// Filter namespaces list
+	for _, ns := range s.Namespaces {
+		if allowed[ns] {
+			filtered.Namespaces = append(filtered.Namespaces, ns)
+		}
+	}
+
+	// Filter namespaced resources
+	for _, r := range s.AgentgatewayBackends {
+		if allowed[r.Namespace] {
+			filtered.AgentgatewayBackends = append(filtered.AgentgatewayBackends, r)
+		}
+	}
+	for _, r := range s.AgentgatewayPolicies {
+		if allowed[r.Namespace] {
+			filtered.AgentgatewayPolicies = append(filtered.AgentgatewayPolicies, r)
+		}
+	}
+	for _, r := range s.HTTPRoutes {
+		if allowed[r.Namespace] {
+			filtered.HTTPRoutes = append(filtered.HTTPRoutes, r)
+		}
+	}
+	for _, r := range s.KagentAgents {
+		if allowed[r.Namespace] {
+			filtered.KagentAgents = append(filtered.KagentAgents, r)
+		}
+	}
+	for _, r := range s.KagentMCPServers {
+		if allowed[r.Namespace] {
+			filtered.KagentMCPServers = append(filtered.KagentMCPServers, r)
+		}
+	}
+	for _, r := range s.KagentRemoteMCPServers {
+		if allowed[r.Namespace] {
+			filtered.KagentRemoteMCPServers = append(filtered.KagentRemoteMCPServers, r)
+		}
+	}
+	for _, r := range s.Services {
+		if allowed[r.Namespace] {
+			filtered.Services = append(filtered.Services, r)
+		}
+	}
+
+	return filtered
+}
+
 // ---- agentgateway resource representations ----
 
 type GatewayResource struct {
@@ -212,6 +277,7 @@ type Policy struct {
 	RequireRateLimit    bool
 	MaxToolsWarning     int // If MCP server has more than this many tools, generate Warning
 	MaxToolsCritical    int // If MCP server has more than this many tools, generate Critical
+	TargetNamespaces    []string // If non-empty, only evaluate resources in these namespaces
 	Weights             ScoringWeights
 	SeverityPenalties   SeverityPenalties
 }

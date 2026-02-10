@@ -175,8 +175,8 @@ spec:
               containerPort: 3000
               protocol: TCP
           env:
-            - name: NEXT_PUBLIC_API_URL
-              value: "http://localhost:8090"
+            - name: CONTROLLER_API_URL
+              value: "http://mcp-governance-controller.mcp-governance.svc.cluster.local:8090"
           resources:
             requests:
               cpu: 50m

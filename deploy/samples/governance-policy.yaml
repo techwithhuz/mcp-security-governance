@@ -31,6 +31,8 @@ spec:
   targetNamespaces:
     - mcp-system
     - agents
+    - kagent
+    - agentgateway-system
     - default
 ---
 # Sample GovernanceEvaluation trigger

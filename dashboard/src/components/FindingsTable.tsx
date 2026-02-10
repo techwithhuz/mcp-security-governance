@@ -21,7 +21,6 @@ export default function FindingsTable({ findings }: FindingsTableProps) {
   const [filterCategory, setFilterCategory] = useState<string>('All');
 
   const categories = ['All', ...Array.from(new Set(findings.map(f => f.category)))];
-  const severities = ['All', 'Critical', 'High', 'Medium', 'Low'];
 
   const filtered = findings.filter(f => {
     if (filterSeverity !== 'All' && f.severity !== filterSeverity) return false;

@@ -99,3 +99,16 @@ Dashboard image
 {{- define "mcp-governance.dashboardImage" -}}
 {{- printf "%s:%s" .Values.dashboard.image.repository .Values.dashboard.image.tag }}
 {{- end }}
+
+{{/*
+Controller in-cluster API URL.
+Uses dashboard.apiUrl if set explicitly, otherwise builds from the controller
+service name, release namespace, and port.
+*/}}
+{{- define "mcp-governance.controllerApiUrl" -}}
+{{- if .Values.dashboard.apiUrl }}
+{{- .Values.dashboard.apiUrl }}
+{{- else }}
+{{- printf "http://mcp-governance-controller.%s.svc.cluster.local:%v" .Release.Namespace (.Values.controller.port | default 8090) }}
+{{- end }}
+{{- end }}

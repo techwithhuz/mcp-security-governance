@@ -1,6 +1,8 @@
+{{- if .Values.createNamespace }}
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: {{ .Values.namespace }}
+  name: {{ .Release.Namespace }}
   labels:
     {{- include "mcp-governance.labels" . | nindent 4 }}
+{{- end }}

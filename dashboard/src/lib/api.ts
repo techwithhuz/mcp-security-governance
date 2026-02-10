@@ -1,4 +1,15 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090';
+import {
+  ScoreResponse,
+  Finding,
+  ResourceSummary,
+  ResourceDetailResponse,
+  NamespaceScore,
+  ScoreBreakdown,
+  TrendPoint,
+  GovernanceData,
+} from './types';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
 async function fetchAPI<T>(endpoint: string): Promise<T> {
   const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -10,34 +21,34 @@ async function fetchAPI<T>(endpoint: string): Promise<T> {
   return res.json();
 }
 
-export async function getScore(): Promise<{ score: number; grade: string; phase: string; categories: any[]; explanation: string }> {
+export async function getScore(): Promise<ScoreResponse> {
   return fetchAPI('/api/governance/score');
 }
 
-export async function getFindings(): Promise<{ findings: any[]; total: number; bySeverity: Record<string, number> }> {
+export async function getFindings(): Promise<{ findings: Finding[]; total: number; bySeverity: Record<string, number> }> {
   return fetchAPI('/api/governance/findings');
 }
 
-export async function getResources(): Promise<any> {
+export async function getResources(): Promise<ResourceSummary> {
   return fetchAPI('/api/governance/resources');
 }
 
-export async function getNamespaces(): Promise<{ namespaces: any[] }> {
+export async function getNamespaces(): Promise<{ namespaces: NamespaceScore[] }> {
   return fetchAPI('/api/governance/namespaces');
 }
 
-export async function getBreakdown(): Promise<any> {
+export async function getBreakdown(): Promise<ScoreBreakdown> {
   return fetchAPI('/api/governance/breakdown');
 }
 
-export async function getTrends(): Promise<{ trends: any[] }> {
+export async function getTrends(): Promise<{ trends: TrendPoint[] }> {
   return fetchAPI('/api/governance/trends');
 }
 
-export async function getFullEvaluation(): Promise<any> {
+export async function getFullEvaluation(): Promise<GovernanceData> {
   return fetchAPI('/api/governance/evaluation');
 }
 
-export async function getResourceDetail(): Promise<{ resources: any[]; total: number }> {
+export async function getResourceDetail(): Promise<ResourceDetailResponse> {
   return fetchAPI('/api/governance/resources/detail');
 }
