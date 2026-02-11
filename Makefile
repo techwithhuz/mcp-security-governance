@@ -1,4 +1,4 @@
-.PHONY: all build-controller build-dashboard load-images deploy clean dev-api dev-dashboard helm-install helm-install-samples helm-upgrade helm-uninstall helm-template
+.PHONY: all build-controller build-dashboard load-images deploy clean dev-api dev-dashboard test helm-install helm-install-samples helm-upgrade helm-uninstall helm-template
 
 CLUSTER_NAME := mcp-governance
 CONTROLLER_IMAGE := mcp-governance-controller:latest
@@ -11,6 +11,10 @@ HELM_CHART := ./charts/mcp-governance
 # =====================
 
 all: build-controller build-dashboard load-images deploy
+
+test:
+	@echo "🧪 Running controller tests..."
+	cd controller && go test ./... -v -count=1
 
 build-controller:
 	@echo "🔨 Building controller image..."
