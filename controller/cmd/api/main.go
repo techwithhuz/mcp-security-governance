@@ -46,6 +46,8 @@ func main() {
 	lastCluster = currentState
 	lastResult = evaluator.Evaluate(currentState.FilterByNamespaces(policy.TargetNamespaces, policy.ExcludeNamespaces), policy)
 	recordTrendPoint(lastResult)
+	updatePolicyStatus(policy.Name, lastResult)
+	updateEvaluationStatus(policy.Name, lastResult)
 	log.Printf("[governance] Initial evaluation. Score: %d, Findings: %d (Policy: AgentGW=%v, CORS=%v, JWT=%v, RBAC=%v, TLS=%v, PromptGuard=%v, RateLimit=%v, TargetNS=%v, ExcludeNS=%v)", 
 		lastResult.Score, len(lastResult.Findings),
 		policy.RequireAgentGateway, policy.RequireCORS, policy.RequireJWTAuth, 
@@ -68,6 +70,8 @@ func main() {
 			stateMu.Unlock()
 
 			recordTrendPoint(res)
+			updatePolicyStatus(p.Name, res)
+			updateEvaluationStatus(p.Name, res)
 			log.Printf("[governance] Re-evaluated cluster. Score: %d, Findings: %d", res.Score, len(res.Findings))
 		}
 	}()
@@ -575,6 +579,26 @@ func loadPolicy() evaluator.Policy {
 	}
 	log.Printf("[governance] Using default policy")
 	return evaluator.DefaultPolicy()
+}
+
+// updatePolicyStatus writes the evaluation result back to the MCPGovernancePolicy CR status subresource.
+func updatePolicyStatus(policyName string, result *evaluator.EvaluationResult) {
+	if discoverer == nil || policyName == "" || result == nil {
+		return
+	}
+	if err := discoverer.UpdatePolicyStatus(context.Background(), policyName, result); err != nil {
+		log.Printf("[governance] WARNING: Failed to update policy status: %v", err)
+	}
+}
+
+// updateEvaluationStatus writes the evaluation result back to GovernanceEvaluation CRs that reference the policy.
+func updateEvaluationStatus(policyName string, result *evaluator.EvaluationResult) {
+	if discoverer == nil || policyName == "" || result == nil {
+		return
+	}
+	if err := discoverer.UpdateEvaluationStatus(context.Background(), policyName, result); err != nil {
+		log.Printf("[governance] WARNING: Failed to update evaluation status: %v", err)
+	}
 }
 
 // discoverClusterState is the fallback simulated discovery

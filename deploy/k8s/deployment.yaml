@@ -42,6 +42,7 @@ rules:
   - apiGroups: ["governance.mcp.io"]
     resources:
       - mcpgovernancepolicies
+      - mcpgovernancepolicies/status
       - governanceevaluations
       - governanceevaluations/status
     verbs: ["get", "list", "watch", "create", "update", "patch"]

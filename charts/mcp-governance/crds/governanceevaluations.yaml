@@ -120,6 +120,9 @@ spec:
                 lastEvaluationTime:
                   type: string
                   format: date-time
+                findingsCount:
+                  type: integer
+                  description: "Total number of findings detected"
       subresources:
         status: {}
       additionalPrinterColumns:
@@ -134,7 +137,7 @@ spec:
           jsonPath: .status.phase
         - name: Findings
           type: integer
-          jsonPath: .status.findings
+          jsonPath: .status.findingsCount
           priority: 1
         - name: Age
           type: date

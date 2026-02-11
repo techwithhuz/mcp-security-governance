@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -637,7 +638,9 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 		return nil
 	}
 
-	policy := &evaluator.Policy{}
+	policy := &evaluator.Policy{
+		Name: policyObj.GetName(),
+	}
 
 	// Parse boolean requirements
 	if val, ok := spec["requireAgentGateway"].(bool); ok {
@@ -744,6 +747,188 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 	log.Printf("[discovery] Loaded MCPGovernancePolicy: %s/%s (targetNS=%v, excludeNS=%v)",
 		policyObj.GetNamespace(), policyObj.GetName(), policy.TargetNamespaces, policy.ExcludeNamespaces)
 	return policy
+}
+
+// UpdatePolicyStatus updates the status subresource of the MCPGovernancePolicy CR
+// with the latest evaluation result (score, phase, timestamp, conditions).
+func (d *K8sDiscoverer) UpdatePolicyStatus(ctx context.Context, policyName string, result *evaluator.EvaluationResult) error {
+	gvr := schema.GroupVersionResource{
+		Group:    "governance.mcp.io",
+		Version:  "v1alpha1",
+		Resource: "mcpgovernancepolicies",
+	}
+
+	// Get the current resource (cluster-scoped, so no namespace)
+	obj, err := d.dynamicClient.Resource(gvr).Get(ctx, policyName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get MCPGovernancePolicy %q: %w", policyName, err)
+	}
+
+	// Determine phase from score
+	phase := "Critical"
+	switch {
+	case result.Score >= 90:
+		phase = "Compliant"
+	case result.Score >= 70:
+		phase = "PartiallyCompliant"
+	case result.Score >= 50:
+		phase = "NonCompliant"
+	}
+
+	now := result.Timestamp.Format(time.RFC3339)
+
+	// Build conditions
+	conditions := []interface{}{
+		map[string]interface{}{
+			"type":               "Evaluated",
+			"status":             "True",
+			"reason":             "EvaluationComplete",
+			"message":            fmt.Sprintf("Cluster governance score: %d/100 (%s). %d finding(s) detected.", result.Score, phase, len(result.Findings)),
+			"lastTransitionTime": now,
+		},
+	}
+
+	// Set the status
+	status := map[string]interface{}{
+		"phase":              phase,
+		"clusterScore":       int64(result.Score),
+		"lastEvaluationTime": now,
+		"conditions":         conditions,
+	}
+
+	if err := unstructured.SetNestedField(obj.Object, status, "status"); err != nil {
+		return fmt.Errorf("failed to set status: %w", err)
+	}
+
+	// Update the status subresource
+	_, err = d.dynamicClient.Resource(gvr).UpdateStatus(ctx, obj, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update MCPGovernancePolicy status: %w", err)
+	}
+
+	log.Printf("[discovery] Updated MCPGovernancePolicy %q status: score=%d, phase=%s", policyName, result.Score, phase)
+	return nil
+}
+
+// UpdateEvaluationStatus writes the evaluation result back to all GovernanceEvaluation CRs
+// that reference the given policy (via spec.policyRef).
+func (d *K8sDiscoverer) UpdateEvaluationStatus(ctx context.Context, policyName string, result *evaluator.EvaluationResult) error {
+	gvr := schema.GroupVersionResource{
+		Group:    "governance.mcp.io",
+		Version:  "v1alpha1",
+		Resource: "governanceevaluations",
+	}
+
+	// List all GovernanceEvaluation CRs (cluster-scoped)
+	evalList, err := d.dynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list GovernanceEvaluations: %w", err)
+	}
+
+	for _, evalObj := range evalList.Items {
+		// Check if this evaluation references our policy
+		policyRef, found, _ := unstructured.NestedString(evalObj.Object, "spec", "policyRef")
+		if !found || policyRef != policyName {
+			continue
+		}
+
+		// Determine phase from score
+		phase := "Critical"
+		switch {
+		case result.Score >= 90:
+			phase = "Compliant"
+		case result.Score >= 70:
+			phase = "PartiallyCompliant"
+		case result.Score >= 50:
+			phase = "NonCompliant"
+		}
+
+		now := result.Timestamp.Format(time.RFC3339)
+
+		// Build findings array
+		findings := make([]interface{}, 0, len(result.Findings))
+		for _, f := range result.Findings {
+			findings = append(findings, map[string]interface{}{
+				"id":          f.ID,
+				"severity":    f.Severity,
+				"category":    f.Category,
+				"title":       f.Title,
+				"description": f.Description,
+				"impact":      f.Impact,
+				"remediation": f.Remediation,
+				"resourceRef": f.ResourceRef,
+				"namespace":   f.Namespace,
+				"timestamp":   f.Timestamp,
+			})
+		}
+
+		// Build resourceSummary
+		rs := result.ResourceSummary
+		resourceSummary := map[string]interface{}{
+			"gatewaysFound":          int64(rs.GatewaysFound),
+			"agentgatewayBackends":   int64(rs.AgentgatewayBackends),
+			"agentgatewayPolicies":   int64(rs.AgentgatewayPolicies),
+			"httpRoutes":             int64(rs.HTTPRoutes),
+			"kagentAgents":           int64(rs.KagentAgents),
+			"kagentMCPServers":       int64(rs.KagentMCPServers),
+			"kagentRemoteMCPServers": int64(rs.KagentRemoteMCPServers),
+			"compliantResources":     int64(rs.CompliantResources),
+			"nonCompliantResources":  int64(rs.NonCompliantResources),
+			"totalMCPEndpoints":      int64(rs.TotalMCPEndpoints),
+			"exposedMCPEndpoints":    int64(rs.ExposedMCPEndpoints),
+		}
+
+		// Build scoreBreakdown
+		sb := result.ScoreBreakdown
+		scoreBreakdown := map[string]interface{}{
+			"agentGatewayScore":   int64(sb.AgentGatewayScore),
+			"authenticationScore": int64(sb.AuthenticationScore),
+			"authorizationScore":  int64(sb.AuthorizationScore),
+			"corsScore":           int64(sb.CORSScore),
+			"tlsScore":            int64(sb.TLSScore),
+			"promptGuardScore":    int64(sb.PromptGuardScore),
+			"rateLimitScore":      int64(sb.RateLimitScore),
+		}
+
+		// Build namespaceScores
+		nsScores := make([]interface{}, 0, len(result.NamespaceScores))
+		for _, ns := range result.NamespaceScores {
+			nsScores = append(nsScores, map[string]interface{}{
+				"namespace": ns.Namespace,
+				"score":     int64(ns.Score),
+				"findings":  int64(ns.Findings),
+			})
+		}
+
+		// Set the status
+		status := map[string]interface{}{
+			"score":              int64(result.Score),
+			"phase":              phase,
+			"findings":           findings,
+			"resourceSummary":    resourceSummary,
+			"scoreBreakdown":     scoreBreakdown,
+			"namespaceScores":    nsScores,
+			"lastEvaluationTime": now,
+			"findingsCount":      int64(len(result.Findings)),
+		}
+
+		if err := unstructured.SetNestedField(evalObj.Object, status, "status"); err != nil {
+			log.Printf("[discovery] Failed to set GovernanceEvaluation %q status: %v", evalObj.GetName(), err)
+			continue
+		}
+
+		// Update the status subresource
+		_, err = d.dynamicClient.Resource(gvr).UpdateStatus(ctx, &evalObj, metav1.UpdateOptions{})
+		if err != nil {
+			log.Printf("[discovery] Failed to update GovernanceEvaluation %q status: %v", evalObj.GetName(), err)
+			continue
+		}
+
+		log.Printf("[discovery] Updated GovernanceEvaluation %q status: score=%d, phase=%s, findings=%d",
+			evalObj.GetName(), result.Score, phase, len(result.Findings))
+	}
+
+	return nil
 }
 
 // ---- helper functions for unstructured data access ----
