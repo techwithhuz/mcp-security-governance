@@ -32,6 +32,7 @@
 - [Dashboard](#-dashboard)
 - [API Reference](#-api-reference)
 - [Local Development](#-local-development)
+- [Testing](#-testing)
 - [Project Structure](#-project-structure)
 - [Custom Resources](#-custom-resources)
 - [Makefile Reference](#-makefile-reference)
@@ -57,28 +58,60 @@ As AI agents powered by the **Model Context Protocol (MCP)** proliferate across 
 
 ## 🏗️ Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                       Kubernetes Cluster                         │
-│                                                                  │
-│  ┌──────────────────┐         ┌────────────────────────────┐     │
-│  │    Dashboard      │◄───────│   Governance Controller    │     │
-│  │    (Next.js)      │  REST  │   (Go API Server)          │     │
-│  │    :3000          │  API   │   :8090                    │     │
-│  └──────────────────┘         └────────────┬───────────────┘     │
-│                                             │                    │
-│                                  ┌──────────▼──────────┐         │
-│                                  │   Kubernetes API     │         │
-│                                  │   (list / watch)     │         │
-│                                  └──────────┬──────────┘         │
-│                    ┌────────────────────┬────┴────┬──────────┐   │
-│                    ▼                    ▼         ▼          ▼   │
-│             AgentGateway          Kagent CRDs   Gateway   Governance │
-│             CRDs                                API       CRDs      │
-│             • Backend             • Agent       • Gateway           │
-│             • Policy              • MCPServer   • HTTPRoute         │
-│             • Parameters          • RemoteMCP                       │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph K8s["☸ Kubernetes Cluster"]
+        direction TB
+
+        subgraph UI["🖥️ Dashboard"]
+            Dashboard["<b>Next.js Dashboard</b><br/>:3000<br/><i>Auto-refresh every 15s</i>"]
+        end
+
+        subgraph Ctrl["⚙️ Governance Controller"]
+            API["<b>Go API Server</b><br/>:8090"]
+            Evaluator["<b>Scoring Engine</b><br/>8 governance categories<br/>0–100 weighted score"]
+            Discovery["<b>Resource Discovery</b><br/>Every 30s"]
+        end
+
+        subgraph K8sAPI["🔌 Kubernetes API"]
+            APIServer["list / watch"]
+        end
+
+        subgraph CRDs["📦 Discovered Resources"]
+            AGW["<b>🛡️ AgentGateway</b><br/>• Backend<br/>• Policy<br/>• Parameters"]
+            Kagent["<b>🤖 Kagent</b><br/>• Agent<br/>• MCPServer<br/>• RemoteMCPServer"]
+            GW["<b>🌐 Gateway API</b><br/>• Gateway<br/>• HTTPRoute<br/>• GatewayClass"]
+            GOV["<b>📋 Governance</b><br/>• MCPGovernancePolicy<br/>• GovernanceEvaluation"]
+        end
+    end
+
+    Dashboard -- "REST API<br/>polls every 15s" --> API
+    API --> Evaluator
+    Evaluator --> Discovery
+    Discovery -- "list / watch" --> APIServer
+    APIServer --> AGW
+    APIServer --> Kagent
+    APIServer --> GW
+    APIServer --> GOV
+    Evaluator -- "writes status" --> GOV
+
+    classDef ui fill:#6366f1,stroke:#4f46e5,color:#fff,stroke-width:2px
+    classDef ctrl fill:#0ea5e9,stroke:#0284c7,color:#fff,stroke-width:2px
+    classDef api fill:#64748b,stroke:#475569,color:#fff,stroke-width:2px
+    classDef agw fill:#f59e0b,stroke:#d97706,color:#fff,stroke-width:2px
+    classDef kagent fill:#10b981,stroke:#059669,color:#fff,stroke-width:2px
+    classDef gw fill:#8b5cf6,stroke:#7c3aed,color:#fff,stroke-width:2px
+    classDef gov fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px
+    classDef cluster fill:#f1f5f9,stroke:#94a3b8,color:#1e293b,stroke-width:2px
+
+    class Dashboard ui
+    class API,Evaluator,Discovery ctrl
+    class APIServer api
+    class AGW agw
+    class Kagent kagent
+    class GW gw
+    class GOV gov
+    class K8s cluster
 ```
 
 ### Data Flow
@@ -624,6 +657,43 @@ kubectl rollout restart deployment mcp-governance-dashboard -n mcp-governance
 
 ---
 
+## 🧪 Testing
+
+The controller includes comprehensive Go unit tests covering the evaluator engine, discovery helpers, and API handlers.
+
+### Running Tests
+
+```bash
+# Run all tests
+cd controller && go test ./... -v
+
+# Run tests for a specific package
+go test ./pkg/evaluator/... -v
+go test ./pkg/discovery/... -v
+go test ./cmd/api/... -v
+
+# Run with race detection
+go test ./... -race -v
+
+# Run with coverage report
+go test ./... -coverprofile=coverage.out
+go tool cover -html=coverage.out    # Open HTML report in browser
+```
+
+### Test Coverage
+
+| Package | Test File | Tests | What's Covered |
+|---|---|---|---|
+| `pkg/evaluator` | `evaluator_test.go` | 85+ | All 9 governance checks (AgentGateway, Authentication, Authorization, CORS, TLS, PromptGuard, RateLimit, ToolCount, Exposure), scoring engine, severity penalties, weighted averages, infrastructure absence detection, namespace-level scores, custom penalties & weights, edge cases |
+| `pkg/discovery` | `discovery_test.go` | 17 | `getNestedMap`, `getNestedString`, `getNestedInt`, `getNestedSlice` — all nested object traversal helpers with multi-level, missing key, wrong type, and empty cases |
+| `cmd/api` | `main_test.go` | 30+ | All HTTP handlers (health, score, findings, resources, namespaces, breakdown, evaluation, resource detail, trends), `getGrade`/`getPhase`/`statusLabel` helpers, `buildResourceDetail` score calculation, `recordTrendPoint` with 100-point cap, CORS middleware preflight, JSON response helper |
+
+### CI Integration
+
+Tests run automatically in the **CI pipeline** (`.github/workflows/ci.yaml`) on every push and pull request to `main`. The pipeline runs `go test ./... -v -count=1` after `go vet` and before the build step.
+
+---
+
 ## 📁 Project Structure
 
 ```
@@ -636,14 +706,17 @@ mcp-security-governance/
 │
 ├── controller/                            # Go governance controller
 │   ├── cmd/api/
-│   │   └── main.go                       # REST API server, CORS middleware, all endpoints
+│   │   ├── main.go                       # REST API server, CORS middleware, all endpoints
+│   │   └── main_test.go                  # API handler tests (httptest)
 │   ├── pkg/
 │   │   ├── apis/governance/v1alpha1/
 │   │   │   └── types.go                  # CRD Go types (MCPGovernancePolicy, GovernanceEvaluation)
 │   │   ├── discovery/
-│   │   │   └── discovery.go             # K8s resource discovery + MCPGovernancePolicy reader
+│   │   │   ├── discovery.go             # K8s resource discovery + MCPGovernancePolicy reader
+│   │   │   └── discovery_test.go        # Discovery helper tests
 │   │   └── evaluator/
-│   │       └── evaluator.go             # Scoring engine — 8 categories, configurable penalties
+│   │       ├── evaluator.go             # Scoring engine — 8 categories, configurable penalties
+│   │       └── evaluator_test.go        # Evaluator tests (85+ test cases)
 │   ├── Dockerfile                        # Multi-stage Go build (alpine)
 │   ├── go.mod
 │   └── go.sum
@@ -909,6 +982,7 @@ When you run `kubectl get ge`, these columns are displayed:
 |---|---|
 | `make create-cluster` | Create Kind cluster with port mappings and namespaces |
 | `make all` | **Full pipeline:** build → load → deploy CRDs → deploy app |
+| `make test` | Run all Go unit tests for the controller (`go test ./... -v`) |
 | `make build-controller` | Build Go controller container image |
 | `make build-dashboard` | Build Next.js dashboard container image |
 | `make load-images` | Load built images into the Kind cluster |
@@ -941,7 +1015,7 @@ This project includes GitHub Actions workflows for continuous integration and au
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| **CI** (`.github/workflows/ci.yaml`) | Push / PR to `main` | Builds Go controller, builds Next.js dashboard, lints Helm chart |
+| **CI** (`.github/workflows/ci.yaml`) | Push / PR to `main` | Vets & tests Go controller, builds Next.js dashboard, lints Helm chart |
 | **Release** (`.github/workflows/release.yaml`) | Push a `v*` tag | Builds & pushes multi-arch container images to GHCR, packages & pushes Helm chart to GHCR OCI, creates a GitHub Release |
 
 ### Published Artifacts
