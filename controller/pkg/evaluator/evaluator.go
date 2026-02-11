@@ -291,6 +291,7 @@ type NamespaceScore struct {
 
 // Policy holds the governance policy configuration
 type Policy struct {
+	Name                string   // Name of the MCPGovernancePolicy CR (for status updates)
 	RequireAgentGateway bool
 	RequireCORS         bool
 	RequireJWTAuth      bool

@@ -472,10 +472,12 @@ spec:
     low: 5                        # Points deducted per Low finding
 
   # ── Scope ────────────────────────────────────────────
-  targetNamespaces:               # Empty array = all namespaces
-    - mcp-system
-    - agents
-    - default
+  targetNamespaces: []            # Empty = scan all namespaces (recommended)
+  excludeNamespaces:              # Namespaces to skip (applied after targetNamespaces)
+    - kube-system
+    - kube-public
+    - kube-node-lease
+    - local-path-storage
 ```
 
 ### Field Reference
@@ -496,7 +498,8 @@ spec:
 | `severityPenalties.high` | int | `25` | Points deducted per High finding |
 | `severityPenalties.medium` | int | `15` | Points deducted per Medium finding |
 | `severityPenalties.low` | int | `5` | Points deducted per Low finding |
-| `targetNamespaces` | []string | `[]` (all) | Namespaces to monitor |
+| `targetNamespaces` | []string | `[]` (all) | Namespaces to monitor. If empty, all namespaces are scanned. |
+| `excludeNamespaces` | []string | `[]` | Namespaces to exclude from monitoring (e.g., `kube-system`). Applied after `targetNamespaces`. |
 
 > **Tip:** Set `require*` fields to `false` to exclude categories from scoring entirely. Only enabled categories contribute to the weighted score.
 
@@ -714,13 +717,17 @@ mcp-security-governance/
 
 **Scope:** Cluster  
 **Short name:** `mgp`  
-**Purpose:** Defines what to enforce and how to score.
+**Purpose:** Defines what to enforce and how to score. The controller automatically writes evaluation results back to the CR's `.status` subresource after every evaluation cycle.
 
 ```bash
-# List policies
+# List policies — shows Score, Phase, and Last Evaluated columns
 kubectl get mgp
 
-# Describe
+# Example output:
+# NAME                    SCORE   PHASE      LAST EVALUATED               AGE
+# enterprise-mcp-policy   2       Critical   2026-02-11T03:19:27Z         2d
+
+# Describe for full details
 kubectl describe mgp enterprise-mcp-policy
 ```
 
@@ -756,20 +763,62 @@ spec:
   targetNamespaces:
     - mcp-system
     - agents
+
+# Status is automatically populated by the controller:
+status:
+  clusterScore: 2
+  phase: Critical
+  lastEvaluationTime: "2026-02-11T03:19:27Z"
+  conditions:
+    - type: Evaluated
+      status: "True"
+      reason: EvaluationComplete
+      message: "Cluster governance score: 2/100 (Critical). 12 finding(s) detected."
+      lastTransitionTime: "2026-02-11T03:19:27Z"
 ```
+
+#### Status Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `status.clusterScore` | integer | Overall governance score (0–100) |
+| `status.phase` | string | `Compliant` (≥90) · `PartiallyCompliant` (≥70) · `NonCompliant` (≥50) · `Critical` (<50) |
+| `status.lastEvaluationTime` | date-time | Timestamp of the most recent evaluation |
+| `status.conditions` | array | Kubernetes-style conditions with type, status, reason, message |
+
+#### Printer Columns
+
+When you run `kubectl get mgp`, these columns are displayed:
+
+| Column | Source |
+|---|---|
+| Score | `.status.clusterScore` |
+| Phase | `.status.phase` |
+| Last Evaluated | `.status.lastEvaluationTime` |
+| Age | `.metadata.creationTimestamp` |
 
 ### GovernanceEvaluation
 
 **Scope:** Cluster  
 **Short names:** `ge`, `goveval`  
-**Purpose:** Triggers evaluation and stores results in `.status`.
+**Purpose:** Triggers evaluation and stores the full results in `.status`. The controller automatically populates the status subresource for every GovernanceEvaluation CR that references a policy via `spec.policyRef`.
 
 ```bash
-# List evaluations
+# List evaluations — shows Score, Scope, Phase columns
 kubectl get ge
 
-# Check score
+# Example output:
+# NAME                    SCORE   SCOPE     PHASE      AGE
+# enterprise-evaluation   2       cluster   Critical   2d
+
+# Show detailed findings count (priority 1 column)
+kubectl get ge -o wide
+
+# Check score directly
 kubectl get ge enterprise-evaluation -o jsonpath='{.status.score}'
+
+# View full status
+kubectl get ge enterprise-evaluation -o jsonpath='{.status}' | jq .
 ```
 
 ```yaml
@@ -780,15 +829,24 @@ metadata:
 spec:
   policyRef: enterprise-mcp-policy
   evaluationScope: cluster       # cluster | namespace | resource
+
+# Status is automatically populated by the controller:
 status:
   score: 2
   phase: Critical
+  findingsCount: 12
+  lastEvaluationTime: "2026-02-11T03:19:27Z"
   findings:
-    - id: "agw-001"
+    - id: "AGW-001"
       severity: Critical
       category: AgentGateway
-      title: "No AgentGateway infrastructure detected"
-      remediation: "Deploy agentgateway.dev and route MCP traffic through it"
+      title: "No agentgateway Gateway detected"
+      description: "No Gateway resource with gatewayClassName 'agentgateway' was found..."
+      impact: "MCP servers and agents have no centralized security enforcement point."
+      remediation: "Deploy an agentgateway Gateway..."
+      resourceRef: ""
+      namespace: ""
+      timestamp: "2026-02-11T03:19:27Z"
   scoreBreakdown:
     agentGatewayScore: 0
     authenticationScore: 0
@@ -797,9 +855,51 @@ status:
     tlsScore: 0
     promptGuardScore: 0
     rateLimitScore: 0
-    toolScopeScore: 20
-  lastEvaluationTime: "2026-02-08T12:25:54Z"
+  resourceSummary:
+    gatewaysFound: 0
+    agentgatewayBackends: 0
+    agentgatewayPolicies: 0
+    httpRoutes: 0
+    kagentAgents: 10
+    kagentMCPServers: 0
+    kagentRemoteMCPServers: 2
+    compliantResources: 0
+    nonCompliantResources: 12
+    totalMCPEndpoints: 2
+    exposedMCPEndpoints: 0
+  namespaceScores:
+    - namespace: kagent
+      score: 0
+      findings: 4
+    - namespace: default
+      score: 100
+      findings: 0
 ```
+
+#### Status Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `status.score` | integer | Overall governance score (0–100) |
+| `status.phase` | string | `Compliant` (≥90) · `PartiallyCompliant` (≥70) · `NonCompliant` (≥50) · `Critical` (<50) |
+| `status.findingsCount` | integer | Total number of findings detected |
+| `status.findings` | array | Full list of findings with id, severity, category, title, description, impact, remediation, resourceRef, namespace, timestamp |
+| `status.scoreBreakdown` | object | Per-category scores (agentGatewayScore, authenticationScore, authorizationScore, corsScore, tlsScore, promptGuardScore, rateLimitScore) |
+| `status.resourceSummary` | object | Discovered resource counts (gateways, backends, policies, agents, MCP servers, etc.) |
+| `status.namespaceScores` | array | Per-namespace score and finding count |
+| `status.lastEvaluationTime` | date-time | Timestamp of the most recent evaluation |
+
+#### Printer Columns
+
+When you run `kubectl get ge`, these columns are displayed:
+
+| Column | Source |
+|---|---|
+| Score | `.status.score` |
+| Scope | `.spec.evaluationScope` |
+| Phase | `.status.phase` |
+| Findings *(wide only)* | `.status.findingsCount` |
+| Age | `.metadata.creationTimestamp` |
 
 ---
 
