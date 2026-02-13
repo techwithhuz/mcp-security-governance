@@ -5,6 +5,7 @@ CONTROLLER_IMAGE := mcp-governance-controller:latest
 DASHBOARD_IMAGE := mcp-governance-dashboard:latest
 HELM_RELEASE := mcp-governance
 HELM_CHART := ./charts/mcp-governance
+VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 
 # =====================
 # BUILD
@@ -17,8 +18,8 @@ test:
 	cd controller && go test ./... -v -count=1
 
 build-controller:
-	@echo "🔨 Building controller image..."
-	cd controller && podman build -t $(CONTROLLER_IMAGE) .
+	@echo "🔨 Building controller image ($(VERSION))..."
+	cd controller && podman build --build-arg VERSION=$(VERSION) -t $(CONTROLLER_IMAGE) .
 
 build-dashboard:
 	@echo "🔨 Building dashboard image..."

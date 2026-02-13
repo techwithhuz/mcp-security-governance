@@ -665,6 +665,34 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 		policy.RequireRateLimit = val
 	}
 
+	// Parse AI agent configuration
+	if aiAgentMap, ok := spec["aiAgent"].(map[string]interface{}); ok {
+		if val, ok := aiAgentMap["enabled"].(bool); ok {
+			policy.EnableAIAgent = val
+		}
+		if val, ok := aiAgentMap["provider"].(string); ok {
+			policy.AIProvider = val
+		}
+		if val, ok := aiAgentMap["model"].(string); ok {
+			policy.AIModel = val
+		}
+		if val, ok := aiAgentMap["ollamaEndpoint"].(string); ok {
+			policy.OllamaEndpoint = val
+		}
+		if val, ok := aiAgentMap["scanInterval"].(string); ok {
+			policy.AIScanInterval = val
+		}
+		// scanEnabled defaults to true
+		policy.AIScanEnabled = true
+		if val, ok := aiAgentMap["scanEnabled"].(bool); ok {
+			policy.AIScanEnabled = val
+		}
+	} else if val, ok := spec["enableAIAgent"].(bool); ok {
+		// Backward compatibility: support the old flat enableAIAgent field
+		policy.EnableAIAgent = val
+		policy.AIScanEnabled = true
+	}
+
 	// Parse tool count thresholds
 	if val, ok := spec["maxToolsWarning"].(int64); ok {
 		policy.MaxToolsWarning = int(val)

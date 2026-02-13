@@ -10,6 +10,7 @@ import BreakdownChart from '@/components/BreakdownChart';
 import TrendChart from '@/components/TrendChart';
 import ScoreExplainer from '@/components/ScoreExplainer';
 import ResourceInventory from '@/components/ResourceInventory';
+import AIScoreCard from '@/components/AIScoreCard';
 
 interface DashboardData {
   score: { score: number; grade: string; phase: string; categories: any[]; explanation: string; severityPenalties?: { Critical: number; High: number; Medium: number; Low: number } };
@@ -28,19 +29,22 @@ export default function Dashboard() {
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'resources' | 'findings'>('overview');
+  const [version, setVersion] = useState('');
 
   const fetchData = useCallback(async () => {
     try {
       setRefreshing(true);
-      const [score, findings, resources, breakdown, trends, resourceDetail] = await Promise.all([
+      const [score, findings, resources, breakdown, trends, resourceDetail, health] = await Promise.all([
         fetch('/api/governance/score').then(r => r.json()),
         fetch('/api/governance/findings').then(r => r.json()),
         fetch('/api/governance/resources').then(r => r.json()),
         fetch('/api/governance/breakdown').then(r => r.json()),
         fetch('/api/governance/trends').then(r => r.json()),
         fetch('/api/governance/resources/detail').then(r => r.json()),
+        fetch('/api/health').then(r => r.json()).catch(() => null),
       ]);
 
+      if (health?.version) setVersion(health.version);
       setData({ score, findings, resources, breakdown, trends, resourceDetail });
       setLastUpdated(new Date());
       setConnected(true);
@@ -68,7 +72,7 @@ export default function Dashboard() {
             <Image src="/logo.svg" alt="MCP Governance" width={64} height={64} className="mx-auto animate-pulse drop-shadow-lg" />
             <div className="absolute -inset-4 bg-blue-500/10 rounded-full animate-ping" />
           </div>
-          <h2 className="text-xl font-bold gradient-text mb-2">MCP Governance</h2>
+          <h2 className="text-xl font-bold gradient-text mb-2">MCP Governance <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white uppercase tracking-wider align-middle">AI-Powered</span></h2>
           <p className="text-gov-text-3 text-sm">Connecting to governance controller...</p>
           <div className="mt-4 flex items-center justify-center gap-2">
             <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -115,12 +119,13 @@ export default function Dashboard() {
             <div className="flex items-center gap-4">
               <Image src="/logo.svg" alt="MCP Governance" width={44} height={44} className="drop-shadow-lg" />
               <div>
-                <h1 className="text-xl font-bold">
+                <h1 className="text-xl font-bold flex items-center gap-2">
                   <span className="gradient-text">MCP Governance</span>
-                  <span className="text-gov-text-3 font-normal ml-2 text-sm">Dashboard</span>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white uppercase tracking-wider">AI-Powered</span>
+                  <span className="text-gov-text-3 font-normal ml-1 text-sm">Dashboard</span>
                 </h1>
                 <p className="text-xs text-gov-text-3 mt-0.5">
-                  Kubernetes-native MCP Security Posture Management
+                  AI-Powered Kubernetes-native MCP Security Posture Management
                 </p>
               </div>
             </div>
@@ -297,6 +302,9 @@ export default function Dashboard() {
               severityPenalties={data.score.severityPenalties}
             />
 
+            {/* AI Governance Analysis */}
+            <AIScoreCard />
+
             {/* Failing Resources Quick View */}
             {failingResources.length > 0 && (
               <div className="bg-gov-surface rounded-2xl border border-red-500/20 p-5">
@@ -378,7 +386,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between text-xs text-gov-text-3">
             <div className="flex items-center gap-2">
               <Shield className="w-3.5 h-3.5" />
-              <span>MCP Security Governance Controller v0.1.0</span>
+              <span>MCP Security Governance Controller {version ? `${version}` : ''}</span>
             </div>
             <div className="flex items-center gap-4">
               <span>AgentGateway + Kagent</span>

@@ -33,6 +33,8 @@ controller:
   readinessProbe:
     initialDelaySeconds: 3
     periodSeconds: 5
+  # -- Name of the Kubernetes Secret containing the Google API key (key: google-api-key)
+  googleApiKeySecret: "mcp-governance-ai-secrets"
   serviceAccount:
     # -- Create a service account for the controller
     create: true
@@ -120,6 +122,20 @@ governancePolicy:
       - kube-public
       - kube-node-lease
       - local-path-storage
+    # -- AI Agent configuration for AI-driven governance scoring
+    aiAgent:
+      # -- Enable AI-driven scoring alongside algorithmic scoring
+      enabled: false
+      # -- LLM provider: "gemini" or "ollama"
+      provider: gemini
+      # -- Model name (e.g. "gemini-2.5-flash", "llama3.1", "qwen2.5")
+      model: "gemini-2.5-flash"
+      # -- Ollama API endpoint (only used when provider is "ollama")
+      ollamaEndpoint: "http://localhost:11434"
+      # -- Interval between periodic AI evaluations (e.g. "5m", "10m", "1h")
+      scanInterval: "5m"
+      # -- Whether periodic AI scanning is active (set false to only allow manual triggers)
+      scanEnabled: true
 
 # -- Image pull secrets (for private registries)
 imagePullSecrets: []

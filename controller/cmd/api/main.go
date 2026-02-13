@@ -10,17 +10,32 @@ import (
 	"sync"
 	"time"
 
+	"github.com/techwithhuz/mcp-security-governance/controller/pkg/aiagent"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/discovery"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/evaluator"
 )
 
 var (
+	// Version is set at build time via ldflags
+	Version = "dev"
+
 	stateMu      sync.RWMutex
 	lastResult   *evaluator.EvaluationResult
 	lastCluster  *evaluator.ClusterState
 	currentState *evaluator.ClusterState
 	policy       evaluator.Policy
 	discoverer   *discovery.K8sDiscoverer
+
+	// AI agent state
+	aiAgent      *aiagent.GovernanceAgent
+	lastAIResult *aiagent.AIScoreResult
+	aiAgentErr   error // Tracks initialization or last runtime error
+
+	// AI evaluation rate limiting
+	aiLastRun     time.Time
+	aiBackoff     time.Duration
+	aiMinInterval = 5 * time.Minute // default; overridden by policy.AIScanInterval
+	aiScanPaused  bool              // runtime pause flag (toggled via API)
 )
 
 func main() {
@@ -48,11 +63,17 @@ func main() {
 	recordTrendPoint(lastResult)
 	updatePolicyStatus(policy.Name, lastResult)
 	updateEvaluationStatus(policy.Name, lastResult)
-	log.Printf("[governance] Initial evaluation. Score: %d, Findings: %d (Policy: AgentGW=%v, CORS=%v, JWT=%v, RBAC=%v, TLS=%v, PromptGuard=%v, RateLimit=%v, TargetNS=%v, ExcludeNS=%v)", 
+	log.Printf("[governance] Initial evaluation. Score: %d, Findings: %d (Policy: AgentGW=%v, CORS=%v, JWT=%v, RBAC=%v, TLS=%v, PromptGuard=%v, RateLimit=%v, AIAgent=%v, TargetNS=%v, ExcludeNS=%v)", 
 		lastResult.Score, len(lastResult.Findings),
 		policy.RequireAgentGateway, policy.RequireCORS, policy.RequireJWTAuth, 
 		policy.RequireRBAC, policy.RequireTLS, policy.RequirePromptGuard, policy.RequireRateLimit,
+		policy.EnableAIAgent,
 		policy.TargetNamespaces, policy.ExcludeNamespaces)
+
+	// Initialize AI agent if enabled
+	if policy.EnableAIAgent {
+		initAIAgent(context.Background())
+	}
 
 	// Periodic re-evaluation
 	go func() {
@@ -73,6 +94,11 @@ func main() {
 			updatePolicyStatus(p.Name, res)
 			updateEvaluationStatus(p.Name, res)
 			log.Printf("[governance] Re-evaluated cluster. Score: %d, Findings: %d", res.Score, len(res.Findings))
+
+			// Run AI agent evaluation if enabled
+			if p.EnableAIAgent {
+				runAIEvaluation(context.Background(), cs, p, res)
+			}
 		}
 	}()
 
@@ -87,6 +113,9 @@ func main() {
 	mux.HandleFunc("/api/governance/evaluation", handleFullEvaluation)
 	mux.HandleFunc("/api/governance/trends", handleTrends)
 	mux.HandleFunc("/api/governance/resources/detail", handleResourceDetail)
+	mux.HandleFunc("/api/governance/ai-score", handleAIScore)
+	mux.HandleFunc("/api/governance/ai-score/refresh", handleAIRefresh)
+	mux.HandleFunc("/api/governance/ai-score/toggle", handleAIToggle)
 
 	// CORS middleware
 	handler := corsMiddleware(mux)
@@ -134,7 +163,7 @@ func getSnapshot() stateSnapshot {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	jsonResponse(w, map[string]string{"status": "healthy", "version": "0.1.0"})
+	jsonResponse(w, map[string]string{"status": "healthy", "version": Version})
 }
 
 func getGrade(score int) string {
@@ -227,7 +256,8 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 	for i := range cats {
 		cats[i].Weighted = float64(cats[i].Score*cats[i].Weight) / float64(totalWeight)
 	}
-	jsonResponse(w, map[string]interface{}{
+
+	response := map[string]interface{}{
 		"score":      snap.result.Score,
 		"grade":      getGrade(snap.result.Score),
 		"phase":      getPhase(snap.result.Score),
@@ -242,7 +272,17 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 		"explanation": fmt.Sprintf(
 			"Score is a weighted average of %d governance categories. Each category is scored 0-100 based on findings (Critical: -%dpts, High: -%dpts, Medium: -%dpts, Low: -%dpts). The final score %d/100 = Grade %s.",
 			len(cats), snap.policy.SeverityPenalties.Critical, snap.policy.SeverityPenalties.High, snap.policy.SeverityPenalties.Medium, snap.policy.SeverityPenalties.Low, snap.result.Score, getGrade(snap.result.Score)),
-	})
+		"aiAgentEnabled": snap.policy.EnableAIAgent,
+	}
+
+	// Include AI score if available
+	stateMu.RLock()
+	if lastAIResult != nil {
+		response["aiScore"] = lastAIResult
+	}
+	stateMu.RUnlock()
+
+	jsonResponse(w, response)
 }
 
 func statusLabel(score int) string {
@@ -599,6 +639,260 @@ func updateEvaluationStatus(policyName string, result *evaluator.EvaluationResul
 	if err := discoverer.UpdateEvaluationStatus(context.Background(), policyName, result); err != nil {
 		log.Printf("[governance] WARNING: Failed to update evaluation status: %v", err)
 	}
+}
+
+// ---------- AI Agent ----------
+
+// initAIAgent initializes the AI governance agent
+func initAIAgent(ctx context.Context) {
+	stateMu.RLock()
+	p := policy
+	stateMu.RUnlock()
+
+	provider := p.AIProvider
+	if provider == "" {
+		provider = "gemini"
+	}
+
+	if !aiagent.IsAvailable(provider) {
+		log.Printf("[ai-agent] Provider %q not available — AI agent disabled", provider)
+		aiAgentErr = fmt.Errorf("AI agent provider %q is not available (check env vars or Ollama endpoint)", provider)
+		return
+	}
+
+	config := aiagent.AIAgentConfig{
+		Provider:       provider,
+		Model:          p.AIModel,
+		OllamaEndpoint: p.OllamaEndpoint,
+	}
+
+	var err error
+	aiAgent, err = aiagent.NewGovernanceAgent(ctx, config)
+	if err != nil {
+		log.Printf("[ai-agent] Failed to initialize AI agent: %v", err)
+		aiAgentErr = err
+		return
+	}
+
+	log.Printf("[ai-agent] AI Governance Agent initialized successfully (provider=%s)", provider)
+
+	// Parse scan interval from policy
+	if p.AIScanInterval != "" {
+		if d, err := time.ParseDuration(p.AIScanInterval); err == nil && d >= 1*time.Minute {
+			aiMinInterval = d
+			log.Printf("[ai-agent] Scan interval set to %v", d)
+		} else {
+			log.Printf("[ai-agent] Invalid scanInterval %q, using default %v", p.AIScanInterval, aiMinInterval)
+		}
+	}
+
+	// Respect scanEnabled from policy
+	stateMu.Lock()
+	aiScanPaused = !p.AIScanEnabled
+	stateMu.Unlock()
+	if aiScanPaused {
+		log.Printf("[ai-agent] Periodic scanning is disabled (scanEnabled=false)")
+	}
+
+	// Run initial AI evaluation (always runs once regardless of pause)
+	stateMu.RLock()
+	cs := currentState
+	pol := policy
+	res := lastResult
+	stateMu.RUnlock()
+
+	if cs != nil && res != nil {
+		forceRunAIEvaluation(ctx, cs, pol, res)
+	}
+}
+
+// runAIEvaluation runs the AI agent with rate-limiting and pause checks
+func runAIEvaluation(ctx context.Context, state *evaluator.ClusterState, p evaluator.Policy, result *evaluator.EvaluationResult) {
+	if aiAgent == nil {
+		return
+	}
+
+	// Check if scanning is paused
+	stateMu.RLock()
+	paused := aiScanPaused
+	lastRun := aiLastRun
+	backoff := aiBackoff
+	stateMu.RUnlock()
+
+	if paused {
+		return // scanning is paused
+	}
+
+	// Rate-limit AI evaluations to avoid burning through API quotas
+	interval := aiMinInterval
+	if backoff > interval {
+		interval = backoff
+	}
+	if time.Since(lastRun) < interval {
+		return // too soon, skip this cycle
+	}
+
+	forceRunAIEvaluation(ctx, state, p, result)
+}
+
+// forceRunAIEvaluation runs the AI agent immediately, bypassing rate-limit and pause checks.
+// Used for initial evaluation and manual refresh via API.
+func forceRunAIEvaluation(ctx context.Context, state *evaluator.ClusterState, p evaluator.Policy, result *evaluator.EvaluationResult) {
+	if aiAgent == nil {
+		return
+	}
+
+	log.Printf("[ai-agent] Running AI governance evaluation...")
+
+	stateMu.Lock()
+	aiLastRun = time.Now()
+	stateMu.Unlock()
+
+	aiResult, err := aiAgent.Evaluate(ctx, state, p, result)
+	if err != nil {
+		log.Printf("[ai-agent] AI evaluation failed: %v", err)
+		stateMu.Lock()
+		aiAgentErr = err
+		// Exponential backoff: 5m → 10m → 20m, capped at 30m
+		if aiBackoff == 0 {
+			aiBackoff = aiMinInterval
+		} else {
+			aiBackoff *= 2
+			if aiBackoff > 30*time.Minute {
+				aiBackoff = 30 * time.Minute
+			}
+		}
+		log.Printf("[ai-agent] Next retry in %v", aiBackoff)
+		stateMu.Unlock()
+		return
+	}
+
+	stateMu.Lock()
+	lastAIResult = aiResult
+	aiAgentErr = nil
+	aiBackoff = 0 // reset backoff on success
+	stateMu.Unlock()
+
+	log.Printf("[ai-agent] AI evaluation complete. AI Score: %d (Grade: %s) vs Algorithmic Score: %d",
+		aiResult.Score, aiResult.Grade, result.Score)
+}
+
+// handleAIScore returns the AI agent's governance assessment
+func handleAIScore(w http.ResponseWriter, r *http.Request) {
+	snap := getSnapshot()
+
+	stateMu.RLock()
+	aiResult := lastAIResult
+	aiErr := aiAgentErr
+	paused := aiScanPaused
+	stateMu.RUnlock()
+
+	scanConfig := map[string]interface{}{
+		"scanInterval": aiMinInterval.String(),
+		"scanPaused":   paused,
+	}
+
+	if !snap.policy.EnableAIAgent {
+		jsonResponse(w, map[string]interface{}{
+			"enabled":    false,
+			"scanConfig": scanConfig,
+			"message":    "AI agent scoring is not enabled in the governance policy. Set enableAIAgent: true in MCPGovernancePolicy spec.",
+		})
+		return
+	}
+
+	if aiResult == nil {
+		errMsg := "AI evaluation has not completed yet"
+		if aiErr != nil {
+			errMsg = fmt.Sprintf("AI agent error: %v", aiErr)
+		}
+		jsonResponse(w, map[string]interface{}{
+			"enabled":    true,
+			"available":  false,
+			"scanConfig": scanConfig,
+			"message":    errMsg,
+		})
+		return
+	}
+
+	// Include comparison with algorithmic score
+	algorithmicScore := 0
+	algorithmicGrade := "F"
+	if snap.result != nil {
+		algorithmicScore = snap.result.Score
+		algorithmicGrade = getGrade(snap.result.Score)
+	}
+
+	jsonResponse(w, map[string]interface{}{
+		"enabled":    true,
+		"available":  true,
+		"scanConfig": scanConfig,
+		"aiScore":    aiResult,
+		"comparison": map[string]interface{}{
+			"algorithmicScore": algorithmicScore,
+			"algorithmicGrade": algorithmicGrade,
+			"aiScore":          aiResult.Score,
+			"aiGrade":          aiResult.Grade,
+			"scoreDifference":  aiResult.Score - algorithmicScore,
+		},
+	})
+}
+
+// handleAIRefresh triggers an immediate AI evaluation (bypasses rate-limit and pause)
+func handleAIRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if aiAgent == nil {
+		jsonResponse(w, map[string]interface{}{
+			"success": false,
+			"message": "AI agent is not initialized",
+		})
+		return
+	}
+
+	snap := getSnapshot()
+	if snap.cluster == nil || snap.result == nil {
+		jsonResponse(w, map[string]interface{}{
+			"success": false,
+			"message": "Cluster state not yet available, please wait for initial scan",
+		})
+		return
+	}
+
+	go forceRunAIEvaluation(context.Background(), snap.cluster, snap.policy, snap.result)
+
+	jsonResponse(w, map[string]interface{}{
+		"success": true,
+		"message": "AI evaluation triggered. Results will be available shortly.",
+	})
+}
+
+// handleAIToggle toggles the periodic AI scanning on/off
+func handleAIToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stateMu.Lock()
+	aiScanPaused = !aiScanPaused
+	paused := aiScanPaused
+	stateMu.Unlock()
+
+	status := "resumed"
+	if paused {
+		status = "paused"
+	}
+	log.Printf("[ai-agent] Periodic scanning %s via API", status)
+
+	jsonResponse(w, map[string]interface{}{
+		"success":    true,
+		"scanPaused": paused,
+		"message":    fmt.Sprintf("AI periodic scanning %s", status),
+	})
 }
 
 // discoverClusterState is the fallback simulated discovery

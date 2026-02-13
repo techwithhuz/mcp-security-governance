@@ -30,6 +30,8 @@ type MCPGovernancePolicySpec struct {
 	RequireTLS bool `json:"requireTLS"`
 	// RequireRateLimit enforces rate limiting on MCP endpoints
 	RequireRateLimit bool `json:"requireRateLimit"`
+	// AIAgent configures AI-driven governance scoring using Google ADK alongside algorithmic scoring.
+	AIAgent *AIAgentConfig `json:"aiAgent,omitempty"`
 	// MaxToolsWarning generates a Warning finding if an MCP server exposes more than this many tools (0 = disabled)
 	MaxToolsWarning int `json:"maxToolsWarning,omitempty"`
 	// MaxToolsCritical generates a Critical finding if an MCP server exposes more than this many tools (0 = disabled)
@@ -60,6 +62,22 @@ type ScoringWeights struct {
 	PromptGuard             int `json:"promptGuard,omitempty"`             // default: 10
 	RateLimit               int `json:"rateLimit,omitempty"`               // default: 5
 	ToolScope               int `json:"toolScope,omitempty"`               // default: 5
+}
+
+// AIAgentConfig configures the AI-driven governance scoring agent
+type AIAgentConfig struct {
+	// Enabled toggles AI agent scoring on/off
+	Enabled bool `json:"enabled"`
+	// Provider selects the LLM provider: "gemini" or "ollama"
+	Provider string `json:"provider,omitempty"` // default: "gemini"
+	// Model is the model name to use (e.g. "gemini-2.5-flash", "llama3.1", "qwen2.5")
+	Model string `json:"model,omitempty"` // default: "gemini-2.5-flash"
+	// OllamaEndpoint is the base URL for the Ollama API (only used when provider is "ollama")
+	OllamaEndpoint string `json:"ollamaEndpoint,omitempty"` // default: "http://localhost:11434"
+	// ScanInterval is the interval between periodic AI evaluations (e.g. "5m", "10m", "1h"). Default: "5m"
+	ScanInterval string `json:"scanInterval,omitempty"`
+	// ScanEnabled controls whether periodic AI scanning is active. Default: true
+	ScanEnabled *bool `json:"scanEnabled,omitempty"`
 }
 
 type MCPGovernancePolicyStatus struct {
