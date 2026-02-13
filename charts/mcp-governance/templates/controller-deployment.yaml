@@ -35,6 +35,18 @@ spec:
           env:
             - name: PORT
               value: {{ .Values.controller.port | quote }}
+            {{- if and .Values.governancePolicy.spec.aiAgent.enabled (eq .Values.governancePolicy.spec.aiAgent.provider "gemini") }}
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.googleApiKeySecret | default "mcp-governance-ai-secrets" }}
+                  key: google-api-key
+                  optional: true
+            {{- end }}
+            {{- if and .Values.governancePolicy.spec.aiAgent.enabled (eq .Values.governancePolicy.spec.aiAgent.provider "ollama") }}
+            - name: OLLAMA_HOST
+              value: {{ .Values.governancePolicy.spec.aiAgent.ollamaEndpoint | quote }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /api/health

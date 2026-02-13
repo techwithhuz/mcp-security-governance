@@ -10,6 +10,7 @@ import BreakdownChart from '@/components/BreakdownChart';
 import TrendChart from '@/components/TrendChart';
 import ScoreExplainer from '@/components/ScoreExplainer';
 import ResourceInventory from '@/components/ResourceInventory';
+import AIScoreCard from '@/components/AIScoreCard';
 
 interface DashboardData {
   score: { score: number; grade: string; phase: string; categories: any[]; explanation: string; severityPenalties?: { Critical: number; High: number; Medium: number; Low: number } };
@@ -28,19 +29,22 @@ export default function Dashboard() {
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'resources' | 'findings'>('overview');
+  const [version, setVersion] = useState('');
 
   const fetchData = useCallback(async () => {
     try {
       setRefreshing(true);
-      const [score, findings, resources, breakdown, trends, resourceDetail] = await Promise.all([
+      const [score, findings, resources, breakdown, trends, resourceDetail, health] = await Promise.all([
         fetch('/api/governance/score').then(r => r.json()),
         fetch('/api/governance/findings').then(r => r.json()),
         fetch('/api/governance/resources').then(r => r.json()),
         fetch('/api/governance/breakdown').then(r => r.json()),
         fetch('/api/governance/trends').then(r => r.json()),
         fetch('/api/governance/resources/detail').then(r => r.json()),
+        fetch('/api/health').then(r => r.json()).catch(() => null),
       ]);
 
+      if (health?.version) setVersion(health.version);
       setData({ score, findings, resources, breakdown, trends, resourceDetail });
       setLastUpdated(new Date());
       setConnected(true);
@@ -297,6 +301,9 @@ export default function Dashboard() {
               severityPenalties={data.score.severityPenalties}
             />
 
+            {/* AI Governance Analysis */}
+            <AIScoreCard />
+
             {/* Failing Resources Quick View */}
             {failingResources.length > 0 && (
               <div className="bg-gov-surface rounded-2xl border border-red-500/20 p-5">
@@ -378,7 +385,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between text-xs text-gov-text-3">
             <div className="flex items-center gap-2">
               <Shield className="w-3.5 h-3.5" />
-              <span>MCP Security Governance Controller v0.1.0</span>
+              <span>MCP Security Governance Controller {version ? `${version}` : ''}</span>
             </div>
             <div className="flex items-center gap-4">
               <span>AgentGateway + Kagent</span>

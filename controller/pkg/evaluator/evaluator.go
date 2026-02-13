@@ -299,6 +299,12 @@ type Policy struct {
 	RequirePromptGuard  bool
 	RequireTLS          bool
 	RequireRateLimit    bool
+	EnableAIAgent       bool     // If true, use AI agent for governance scoring alongside algorithmic scoring
+	AIProvider          string   // LLM provider: "gemini" or "ollama" (default: "gemini")
+	AIModel             string   // Model name (e.g. "gemini-2.5-flash", "llama3.1")
+	OllamaEndpoint      string   // Ollama API endpoint (default: "http://localhost:11434")
+	AIScanInterval      string   // Interval between AI evaluations (e.g. "5m", "10m", "1h"); default: "5m"
+	AIScanEnabled       bool     // Whether periodic AI scanning is active (default: true)
 	MaxToolsWarning     int // If MCP server has more than this many tools, generate Warning
 	MaxToolsCritical    int // If MCP server has more than this many tools, generate Critical
 	TargetNamespaces    []string // If non-empty, only evaluate resources in these namespaces

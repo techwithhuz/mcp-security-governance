@@ -108,6 +108,37 @@ spec:
                   description: "Namespaces to exclude from monitoring (e.g. kube-system). Applied after targetNamespaces."
                   items:
                     type: string
+                aiAgent:
+                  type: object
+                  description: "AI agent configuration for AI-driven governance scoring alongside algorithmic scoring"
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                      description: "Enable AI-driven governance scoring"
+                    provider:
+                      type: string
+                      default: "gemini"
+                      description: "LLM provider to use: 'gemini' (Google Gemini API) or 'ollama' (local Ollama instance)"
+                      enum:
+                        - gemini
+                        - ollama
+                    model:
+                      type: string
+                      default: "gemini-2.5-flash"
+                      description: "Model name (e.g. 'gemini-2.5-flash' for Gemini, 'llama3.1' or 'qwen2.5' for Ollama)"
+                    ollamaEndpoint:
+                      type: string
+                      default: "http://localhost:11434"
+                      description: "Ollama API base URL (only used when provider is 'ollama')"
+                    scanInterval:
+                      type: string
+                      default: "5m"
+                      description: "Interval between periodic AI evaluations (e.g. '5m', '10m', '1h')"
+                    scanEnabled:
+                      type: boolean
+                      default: true
+                      description: "Whether periodic AI scanning is active. Set to false to only allow manual triggers."
             status:
               type: object
               properties:

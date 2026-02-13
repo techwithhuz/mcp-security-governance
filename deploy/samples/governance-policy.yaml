@@ -35,6 +35,20 @@ spec:
     - kube-public
     - kube-node-lease
     - local-path-storage
+  # AI Agent configuration (optional)
+  # Provides AI-driven governance scoring alongside algorithmic scoring
+  aiAgent:
+    enabled: true
+    # Provider: "gemini" (requires GOOGLE_API_KEY env var) or "ollama" (local model)
+    provider: gemini
+    # Model name: e.g. "gemini-2.5-flash" for Gemini, "llama3.1" or "qwen2.5" for Ollama
+    model: "gemini-2.5-flash"
+    # Ollama endpoint (only used when provider is "ollama")
+    # ollamaEndpoint: "http://localhost:11434"
+    # Interval between periodic AI evaluations (e.g. "5m", "10m", "1h")
+    scanInterval: "5m"
+    # Set to false to disable periodic scanning (manual-only via dashboard button)
+    scanEnabled: true
 ---
 # Sample GovernanceEvaluation trigger
 apiVersion: governance.mcp.io/v1alpha1

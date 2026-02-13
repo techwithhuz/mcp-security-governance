@@ -3,14 +3,16 @@
 </p>
 
 <p align="center">
-  <strong>Kubernetes-native governance for MCP (Model Context Protocol) infrastructure.</strong><br/>
-  Monitors <a href="https://agentgateway.dev">AgentGateway</a> and <a href="https://kagent.dev">Kagent</a> resources, evaluates security posture with a policy-driven 0–100 scoring model, and surfaces findings in a real-time enterprise dashboard.
+  <strong><span style="color:#a855f7">AI-Powered</span> Kubernetes-native governance for MCP (Model Context Protocol) infrastructure.</strong><br/>
+  Monitors <a href="https://agentgateway.dev">AgentGateway</a> and <a href="https://kagent.dev">Kagent</a> resources, evaluates security posture with a policy-driven 0–100 scoring model, provides <b>AI-powered risk analysis</b> via Google Gemini or Ollama, and surfaces findings in a real-time enterprise dashboard.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Kubernetes-326CE5?logo=kubernetes&logoColor=white" alt="Kubernetes" />
   <img src="https://img.shields.io/badge/Controller-Go%201.25-00ADD8?logo=go&logoColor=white" alt="Go" />
   <img src="https://img.shields.io/badge/Dashboard-Next.js%2014-000?logo=next.js&logoColor=white" alt="Next.js" />
+  <img src="https://img.shields.io/badge/AI-Google%20Gemini-8E75B2?logo=google-gemini&logoColor=white" alt="Gemini" />
+  <img src="https://img.shields.io/badge/AI-Ollama-000?logo=ollama&logoColor=white" alt="Ollama" />
   <img src="https://img.shields.io/badge/Container-Podman-892CA0?logo=podman&logoColor=white" alt="Podman" />
   <img src="https://img.shields.io/badge/Deploy-Helm%203-0F1689?logo=helm&logoColor=white" alt="Helm" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
@@ -24,6 +26,7 @@
 - [Architecture](#-architecture)
 - [What It Checks](#-what-it-checks)
 - [Scoring Model](#-scoring-model)
+- [AI-Powered Governance Scoring](#-ai-powered-governance-scoring)
 - [Prerequisites](#-prerequisites)
 - [Quick Start — Deploy to Kind](#-quick-start--deploy-to-kind)
 - [Deploy to an Existing Cluster](#-deploy-to-an-existing-cluster)
@@ -52,7 +55,8 @@ As AI agents powered by the **Model Context Protocol (MCP)** proliferate across 
 1. **Discovering** all MCP-related resources in your cluster — AgentGateway backends, Kagent agents, RemoteMCPServers, Gateway API routes
 2. **Evaluating** them against a configurable security policy defined as a Kubernetes CRD
 3. **Scoring** your cluster's MCP security posture on a 0–100 scale across 8 governance categories
-4. **Surfacing** findings, trends, and per-resource details in a real-time dashboard
+4. **AI-Powered Analysis** — optionally runs an AI agent (Google Gemini or local Ollama) alongside the algorithmic scorer for deeper risk analysis, reasoning, and actionable suggestions
+5. **Surfacing** findings, trends, and per-resource details in a real-time dashboard with AI insights
 
 ---
 
@@ -70,6 +74,7 @@ graph TB
         subgraph Ctrl["⚙️ Governance Controller"]
             API["<b>Go API Server</b><br/>:8090"]
             Evaluator["<b>Scoring Engine</b><br/>8 governance categories<br/>0–100 weighted score"]
+            AIAgent["<b>🧠 AI Agent</b><br/>Google Gemini / Ollama<br/>Risk analysis & suggestions"]
             Discovery["<b>Resource Discovery</b><br/>Every 30s"]
         end
 
@@ -83,11 +88,19 @@ graph TB
             GW["<b>🌐 Gateway API</b><br/>• Gateway<br/>• HTTPRoute<br/>• GatewayClass"]
             GOV["<b>📋 Governance</b><br/>• MCPGovernancePolicy<br/>• GovernanceEvaluation"]
         end
+
+        subgraph LLM["🌐 LLM Provider"]
+            Gemini["Google Gemini API"]
+            Ollama["Ollama (Local)"]
+        end
     end
 
     Dashboard -- "REST API<br/>polls every 15s" --> API
     API --> Evaluator
+    API --> AIAgent
     Evaluator --> Discovery
+    AIAgent -- "LLM inference" --> Gemini
+    AIAgent -- "LLM inference" --> Ollama
     Discovery -- "list / watch" --> APIServer
     APIServer --> AGW
     APIServer --> Kagent
@@ -102,15 +115,19 @@ graph TB
     classDef kagent fill:#10b981,stroke:#059669,color:#fff,stroke-width:2px
     classDef gw fill:#8b5cf6,stroke:#7c3aed,color:#fff,stroke-width:2px
     classDef gov fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px
+    classDef ai fill:#a855f7,stroke:#9333ea,color:#fff,stroke-width:2px
+    classDef llm fill:#ec4899,stroke:#db2777,color:#fff,stroke-width:2px
     classDef cluster fill:#f1f5f9,stroke:#94a3b8,color:#1e293b,stroke-width:2px
 
     class Dashboard ui
     class API,Evaluator,Discovery ctrl
+    class AIAgent ai
     class APIServer api
     class AGW agw
     class Kagent kagent
     class GW gw
     class GOV gov
+    class Gemini,Ollama llm
     class K8s cluster
 ```
 
@@ -119,8 +136,9 @@ graph TB
 1. The **controller** discovers all MCP-related resources via the Kubernetes API every 30 seconds
 2. It reads the **MCPGovernancePolicy** CRD to determine what to enforce
 3. The **evaluator** scores the cluster and generates findings per category
-4. Results are exposed via a REST API and written back to a **GovernanceEvaluation** CRD
-5. The **dashboard** polls the API every 15 seconds and renders real-time visualizations
+4. If enabled, the **AI agent** sends cluster state to an LLM (Gemini or Ollama) for deeper risk analysis, reasoning, and suggestions
+5. Results are exposed via a REST API and written back to a **GovernanceEvaluation** CRD
+6. The **dashboard** polls the API every 15 seconds and renders real-time visualizations including AI insights
 
 ---
 
@@ -159,6 +177,113 @@ Each category starts at 100. For every finding in that category, the correspondi
 Category Score = max(0, 100 - Σ severity_penalty(finding))
 Cluster Score  = Σ (category_score × weight) / Σ weights
 ```
+
+---
+
+## 🧠 AI-Powered Governance Scoring
+
+MCP Governance includes an optional **AI agent** that runs alongside the algorithmic scoring engine. When enabled, it sends the full cluster state — discovered resources, policy configuration, and algorithmic findings — to an LLM for deeper analysis.
+
+### What the AI Agent Provides
+
+| Feature | Description |
+|---|---|
+| **AI Score** | An independent 0–100 governance score with grade (A–F), generated by the LLM |
+| **Reasoning** | Human-readable explanation of why the AI assigned its score |
+| **Risk Analysis** | Categorized risks with severity, description, and impact assessment |
+| **Actionable Suggestions** | Prioritized remediation steps the AI recommends |
+| **Score Comparison** | Side-by-side comparison of AI score vs algorithmic score |
+
+### Supported LLM Providers
+
+| Provider | Model | Requirements |
+|---|---|---|
+| **Google Gemini** | `gemini-2.5-flash` (default) | `GOOGLE_API_KEY` environment variable. Free tier: 20 requests/day |
+| **Ollama** | Any model (e.g. `llama3.1`, `qwen2.5`) | Local Ollama instance running with the model pulled |
+
+### How It Works
+
+1. The controller initializes the AI agent based on the `aiAgent` block in the MCPGovernancePolicy CR
+2. On each evaluation cycle (configurable via `scanInterval`), the agent constructs a structured prompt with the full cluster security state
+3. The LLM analyzes the state and returns a JSON response with score, reasoning, risks, and suggestions
+4. Results are exposed via the `/api/governance/ai-score` endpoint and rendered in the dashboard
+5. Built-in **rate limiting** with exponential backoff protects against API quota exhaustion
+
+### Configuration
+
+Add the `aiAgent` block to your MCPGovernancePolicy:
+
+```yaml
+apiVersion: governance.mcp.io/v1alpha1
+kind: MCPGovernancePolicy
+metadata:
+  name: enterprise-mcp-policy
+spec:
+  # ... other policy fields ...
+  aiAgent:
+    enabled: true                  # Enable AI-driven scoring
+    provider: gemini               # "gemini" or "ollama"
+    model: "gemini-2.5-flash"      # Model name
+    # ollamaEndpoint: "http://ollama.mcp-governance:11434"  # Only for Ollama
+    scanInterval: "5m"             # How often to run AI evaluation
+    scanEnabled: true              # Set to false to disable periodic scanning
+```
+
+#### AI Agent Field Reference
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `aiAgent.enabled` | bool | `false` | Enable AI-driven governance scoring |
+| `aiAgent.provider` | string | `gemini` | LLM provider: `gemini` (Google Gemini API) or `ollama` (local Ollama) |
+| `aiAgent.model` | string | `gemini-2.5-flash` | Model name for the chosen provider |
+| `aiAgent.ollamaEndpoint` | string | `http://localhost:11434` | Ollama API base URL (only used when provider is `ollama`) |
+| `aiAgent.scanInterval` | string | `5m` | Interval between periodic AI evaluations (e.g. `5m`, `10m`, `1h`). Minimum: `1m` |
+| `aiAgent.scanEnabled` | bool | `true` | Whether periodic scanning is active. Set to `false` to only allow manual triggers from the dashboard |
+
+### Setting Up the API Key (Gemini)
+
+```bash
+# Create a Kubernetes secret with your Google API key
+kubectl create secret generic google-api-key \
+  --from-literal=GOOGLE_API_KEY=your-api-key-here \
+  -n mcp-governance
+
+# The controller deployment references this secret via env var
+```
+
+### Using Ollama (Local LLM)
+
+For air-gapped or privacy-sensitive environments, use Ollama with a local model:
+
+```yaml
+aiAgent:
+  enabled: true
+  provider: ollama
+  model: "llama3.1"
+  ollamaEndpoint: "http://ollama.mcp-governance.svc.cluster.local:11434"
+  scanInterval: "10m"
+```
+
+Deploy Ollama in your cluster or point to an external instance. The controller communicates via the OpenAI-compatible `/v1/chat/completions` endpoint.
+
+### Dashboard Controls
+
+The AI Score Card in the dashboard provides interactive controls:
+
+| Control | Description |
+|---|---|
+| **Refresh button** (🔄) | Triggers an immediate AI evaluation, bypassing the scan interval and pause state |
+| **Pause/Resume toggle** (⏸/▶) | Pauses or resumes periodic scanning at runtime without modifying the CR |
+| **Scan interval display** | Shows the configured scan interval and current scan status (active/paused) |
+
+### Rate Limiting & Backoff
+
+The AI agent includes built-in protection against API quota exhaustion:
+
+- Evaluations are rate-limited to the configured `scanInterval` (default: 5 minutes)
+- On failure, **exponential backoff** kicks in: 5m → 10m → 20m → 30m (capped)
+- On success, backoff resets immediately
+- Manual refresh via the dashboard always bypasses rate limiting
 
 ---
 
@@ -406,6 +531,12 @@ governancePolicy:
     targetNamespaces:
       - production
       - staging
+    aiAgent:
+      enabled: true
+      provider: gemini
+      model: "gemini-2.5-flash"
+      scanInterval: "10m"
+      scanEnabled: true
 ```
 
 ```bash
@@ -457,6 +588,11 @@ helm uninstall mcp-governance
 | `samples.install` | `false` | Install sample MCPGovernancePolicy |
 | `governancePolicy.name` | `enterprise-mcp-policy` | Name of the sample policy |
 | `governancePolicy.spec.*` | *(see values.yaml)* | Full policy spec — all fields configurable |
+| `governancePolicy.spec.aiAgent.enabled` | `false` | Enable AI-driven governance scoring |
+| `governancePolicy.spec.aiAgent.provider` | `gemini` | LLM provider (`gemini` or `ollama`) |
+| `governancePolicy.spec.aiAgent.model` | `gemini-2.5-flash` | Model name |
+| `governancePolicy.spec.aiAgent.scanInterval` | `5m` | AI evaluation interval |
+| `governancePolicy.spec.aiAgent.scanEnabled` | `true` | Enable periodic scanning |
 | `imagePullSecrets` | `[]` | Image pull secrets for private registries |
 | `commonLabels` | `{}` | Additional labels for all resources |
 | `commonAnnotations` | `{}` | Additional annotations for all resources |
@@ -511,6 +647,14 @@ spec:
     - kube-public
     - kube-node-lease
     - local-path-storage
+
+  # ── AI Agent (optional) ─────────────────────────────
+  aiAgent:
+    enabled: true                 # Enable AI-driven scoring
+    provider: gemini              # "gemini" or "ollama"
+    model: "gemini-2.5-flash"     # Model name
+    scanInterval: "5m"            # Evaluation interval
+    scanEnabled: true             # false = manual-only via dashboard
 ```
 
 ### Field Reference
@@ -533,6 +677,12 @@ spec:
 | `severityPenalties.low` | int | `5` | Points deducted per Low finding |
 | `targetNamespaces` | []string | `[]` (all) | Namespaces to monitor. If empty, all namespaces are scanned. |
 | `excludeNamespaces` | []string | `[]` | Namespaces to exclude from monitoring (e.g., `kube-system`). Applied after `targetNamespaces`. |
+| `aiAgent.enabled` | bool | `false` | Enable AI-driven governance scoring alongside algorithmic scoring |
+| `aiAgent.provider` | string | `gemini` | LLM provider: `gemini` or `ollama` |
+| `aiAgent.model` | string | `gemini-2.5-flash` | Model name for the chosen provider |
+| `aiAgent.ollamaEndpoint` | string | `http://localhost:11434` | Ollama API base URL (only when provider is `ollama`) |
+| `aiAgent.scanInterval` | string | `5m` | Interval between periodic AI evaluations (min: `1m`) |
+| `aiAgent.scanEnabled` | bool | `true` | Whether periodic AI scanning is active |
 
 > **Tip:** Set `require*` fields to `false` to exclude categories from scoring entirely. Only enabled categories contribute to the weighted score.
 
@@ -545,6 +695,7 @@ The dashboard provides a real-time view of your MCP security posture with auto-r
 | Component | Description |
 |---|---|
 | **Score Gauge** | Animated 0–100 dial with grade (A–F) and compliance phase |
+| **AI Score Card** | AI-powered governance analysis with score comparison, risk breakdown, suggestions, and refresh/pause controls |
 | **Resource Cards** | At-a-glance counts — Agents, RemoteMCPServers, Gateways, MCP Endpoints, Findings |
 | **Category Breakdown** | Horizontal bar chart showing per-category scores and weights |
 | **Score Explainer** | Human-readable explanation of how the score was calculated |
@@ -554,7 +705,7 @@ The dashboard provides a real-time view of your MCP security posture with auto-r
 
 ### Dashboard Tabs
 
-- **Overview** — Score gauge, resource cards, breakdown chart, trend chart, score explainer
+- **Overview** — Score gauge, AI score card, resource cards, breakdown chart, trend chart, score explainer
 - **Resources** — Full resource inventory with per-resource drill-down
 - **Findings** — Complete findings table with severity filtering
 
@@ -566,7 +717,7 @@ All endpoints are served by the controller on port **8090** with CORS enabled.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/health` | Health check — returns `{"status": "ok"}` |
+| `GET` | `/api/health` | Health check — returns `{"status": "healthy", "version": "..."}` |
 | `GET` | `/api/governance/score` | Overall score, grade, phase, per-category breakdown, explanation |
 | `GET` | `/api/governance/findings` | All findings with total count and severity breakdown |
 | `GET` | `/api/governance/resources` | Resource inventory summary (counts by kind) |
@@ -575,6 +726,9 @@ All endpoints are served by the controller on port **8090** with CORS enabled.
 | `GET` | `/api/governance/breakdown` | Category score breakdown with weights |
 | `GET` | `/api/governance/trends` | Historical score and finding data points |
 | `GET` | `/api/governance/evaluation` | Full evaluation payload (mirrors GovernanceEvaluation CRD status) |
+| `GET` | `/api/governance/ai-score` | AI agent score, reasoning, risks, suggestions, comparison, and scan config |
+| `POST` | `/api/governance/ai-score/refresh` | Trigger an immediate AI evaluation (bypasses rate-limit and pause) |
+| `POST` | `/api/governance/ai-score/toggle` | Toggle periodic AI scanning on/off at runtime |
 
 ### Example responses
 
@@ -610,6 +764,70 @@ curl -s http://localhost:8090/api/governance/findings | jq '.findings[0]'
   "impact": "MCP traffic is not proxied through a secure gateway",
   "remediation": "Deploy agentgateway.dev and configure backends for MCP servers",
   "namespace": "cluster-wide"
+}
+```
+
+**AI Score:**
+```bash
+curl -s http://localhost:8090/api/governance/ai-score | jq .
+```
+```json
+{
+  "enabled": true,
+  "available": true,
+  "scanConfig": {
+    "scanInterval": "5m0s",
+    "scanPaused": false
+  },
+  "aiScore": {
+    "score": 5,
+    "grade": "F",
+    "reasoning": "The cluster has critical security gaps across all governance categories...",
+    "risks": [
+      {
+        "category": "Gateway Security",
+        "severity": "Critical",
+        "description": "No AgentGateway infrastructure detected",
+        "impact": "All MCP traffic is unmonitored and unprotected"
+      }
+    ],
+    "suggestions": [
+      "Deploy AgentGateway and route all MCP traffic through it",
+      "Enable JWT authentication on all gateway listeners",
+      "Configure TLS termination for encrypted connections"
+    ],
+    "timestamp": "2026-02-13T10:30:00Z"
+  },
+  "comparison": {
+    "algorithmicScore": 2,
+    "algorithmicGrade": "F",
+    "aiScore": 5,
+    "aiGrade": "F",
+    "scoreDifference": 3
+  }
+}
+```
+
+**Manual Refresh:**
+```bash
+curl -s -X POST http://localhost:8090/api/governance/ai-score/refresh | jq .
+```
+```json
+{
+  "success": true,
+  "message": "AI evaluation triggered. Results will be available shortly."
+}
+```
+
+**Toggle Scanning:**
+```bash
+curl -s -X POST http://localhost:8090/api/governance/ai-score/toggle | jq .
+```
+```json
+{
+  "success": true,
+  "scanPaused": true,
+  "message": "AI periodic scanning paused"
 }
 ```
 
@@ -709,6 +927,9 @@ mcp-security-governance/
 │   │   ├── main.go                       # REST API server, CORS middleware, all endpoints
 │   │   └── main_test.go                  # API handler tests (httptest)
 │   ├── pkg/
+│   │   ├── aiagent/
+│   │   │   ├── aiagent.go               # AI agent orchestration (Google ADK Go SDK)
+│   │   │   └── ollama.go               # Ollama LLM adapter (OpenAI-compatible)
 │   │   ├── apis/governance/v1alpha1/
 │   │   │   └── types.go                  # CRD Go types (MCPGovernancePolicy, GovernanceEvaluation)
 │   │   ├── discovery/
@@ -728,6 +949,7 @@ mcp-security-governance/
 │   │   │   ├── page.tsx                 # Main dashboard (3 tabs: overview, resources, findings)
 │   │   │   └── globals.css              # Tailwind CSS + custom governance theme
 │   │   ├── components/
+│   │   │   ├── AIScoreCard.tsx          # AI governance score with risks, suggestions, refresh/pause
 │   │   │   ├── ScoreGauge.tsx           # Animated score dial with grade
 │   │   │   ├── BreakdownChart.tsx       # Category breakdown bar chart
 │   │   │   ├── FindingsTable.tsx        # Filterable findings table
@@ -836,6 +1058,12 @@ spec:
   targetNamespaces:
     - mcp-system
     - agents
+  aiAgent:
+    enabled: true
+    provider: gemini
+    model: "gemini-2.5-flash"
+    scanInterval: "5m"
+    scanEnabled: true
 
 # Status is automatically populated by the controller:
 status:
@@ -1172,6 +1400,38 @@ make create-cluster
 make all
 ```
 
+### AI Score shows "Waiting for AI Analysis"
+
+This means the AI agent is enabled but hasn't completed an evaluation yet. Common causes:
+
+- **API quota exhausted** — Gemini free tier allows 20 requests/day. The agent will retry with exponential backoff. Wait for quota to reset or upgrade to a paid plan.
+- **Invalid API key** — Verify the `GOOGLE_API_KEY` secret exists and contains a valid key:
+  ```bash
+  kubectl get secret google-api-key -n mcp-governance
+  kubectl logs deployment/mcp-governance-controller -n mcp-governance | grep ai-agent
+  ```
+- **Ollama not reachable** — If using Ollama, ensure the endpoint is accessible from the controller pod:
+  ```bash
+  kubectl exec deployment/mcp-governance-controller -n mcp-governance -- wget -qO- http://ollama-endpoint:11434/api/tags
+  ```
+
+### AI scanning is consuming too many API calls
+
+Increase the `scanInterval` in your MCPGovernancePolicy or pause scanning:
+
+```yaml
+# In your MCPGovernancePolicy CR
+aiAgent:
+  scanInterval: "30m"    # Increase from default 5m
+  scanEnabled: false      # Or disable periodic scanning entirely
+```
+
+You can also pause scanning at runtime via the dashboard's pause button (⏸) or the API:
+
+```bash
+curl -X POST http://localhost:8090/api/governance/ai-score/toggle
+```
+
 ---
 
 ## 🤝 Contributing
@@ -1194,5 +1454,5 @@ This project is licensed under the [MIT License](LICENSE).
 <p align="center">
   <img src="assets/logo-banner.svg" alt="MCP Governance" width="300" />
   <br/><br/>
-  <sub>Kubernetes-native MCP Security Governance</sub>
+  <sub><span style="color:#a855f7">AI-Powered</span> Kubernetes-native MCP Security Governance</sub>
 </p>
