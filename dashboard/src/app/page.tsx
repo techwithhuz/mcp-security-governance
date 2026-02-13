@@ -72,7 +72,7 @@ export default function Dashboard() {
             <Image src="/logo.svg" alt="MCP Governance" width={64} height={64} className="mx-auto animate-pulse drop-shadow-lg" />
             <div className="absolute -inset-4 bg-blue-500/10 rounded-full animate-ping" />
           </div>
-          <h2 className="text-xl font-bold gradient-text mb-2">MCP Governance</h2>
+          <h2 className="text-xl font-bold gradient-text mb-2">MCP Governance <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white uppercase tracking-wider align-middle">AI-Powered</span></h2>
           <p className="text-gov-text-3 text-sm">Connecting to governance controller...</p>
           <div className="mt-4 flex items-center justify-center gap-2">
             <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -119,12 +119,13 @@ export default function Dashboard() {
             <div className="flex items-center gap-4">
               <Image src="/logo.svg" alt="MCP Governance" width={44} height={44} className="drop-shadow-lg" />
               <div>
-                <h1 className="text-xl font-bold">
+                <h1 className="text-xl font-bold flex items-center gap-2">
                   <span className="gradient-text">MCP Governance</span>
-                  <span className="text-gov-text-3 font-normal ml-2 text-sm">Dashboard</span>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white uppercase tracking-wider">AI-Powered</span>
+                  <span className="text-gov-text-3 font-normal ml-1 text-sm">Dashboard</span>
                 </h1>
                 <p className="text-xs text-gov-text-3 mt-0.5">
-                  Kubernetes-native MCP Security Posture Management
+                  AI-Powered Kubernetes-native MCP Security Posture Management
                 </p>
               </div>
             </div>
