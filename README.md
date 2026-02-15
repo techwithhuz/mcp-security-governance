@@ -879,6 +879,11 @@ spec:
 
 The dashboard provides a real-time MCP-Server-centric view of your cluster's security posture with auto-refresh every 15 seconds.
 
+<p align="center">
+  <img src="assets/dashboard-overview.png" alt="Dashboard Overview" width="100%" />
+  <br/><sub>Dashboard Overview — Cluster Governance Score, MCP server summary tiles, category breakdown, and trend chart</sub>
+</p>
+
 ### Overview Tab
 
 | Component | Description |
@@ -895,6 +900,11 @@ The dashboard provides a real-time MCP-Server-centric view of your cluster's sec
 | **Trend Chart** | Historical score and finding count over time |
 
 ### MCP Servers Tab
+
+<p align="center">
+  <img src="assets/MCP-Servers.png" alt="MCP Servers Tab" width="100%" />
+  <br/><sub>MCP Servers Tab — Per-server security controls, score breakdown, and related resources</sub>
+</p>
 
 | Component | Description |
 |---|---|

@@ -83,6 +83,10 @@ spec:
         - X-MCP-Request-Id
       maxAge: 3600
       allowCredentials: true
+    # CSRF Protection
+    csrf:
+      additionalOrigins:
+        - "https://dashboard.mcp-governance.io"
     # Rate Limiting (local)
     rateLimit:
       local:
