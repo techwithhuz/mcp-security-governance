@@ -99,3 +99,90 @@ export interface GovernanceData {
   breakdown: ScoreBreakdown;
   trends: TrendPoint[];
 }
+
+// ---------- MCP Server-Centric Types ----------
+
+export interface MCPServerScoreBreakdown {
+  gatewayRouting: number;
+  authentication: number;
+  authorization: number;
+  tls: number;
+  cors: number;
+  rateLimit: number;
+  promptGuard: number;
+  toolScope: number;
+}
+
+export interface ScoreExplanation {
+  category: string;
+  score: number;
+  maxScore: number;
+  status: 'pass' | 'partial' | 'fail' | 'not-required';
+  reasons: string[];
+  suggestions: string[];
+  sources: string[];
+}
+
+export interface RelatedResource {
+  kind: string;
+  name: string;
+  namespace: string;
+  status: 'healthy' | 'warning' | 'critical' | 'missing';
+  details?: Record<string, unknown>;
+}
+
+export interface MCPServerView {
+  id: string;
+  name: string;
+  namespace: string;
+  source: 'KagentMCPServer' | 'KagentRemoteMCPServer' | 'AgentgatewayBackendTarget' | 'Service';
+  transport?: string;
+  url?: string;
+  port?: number;
+  toolCount: number;
+  toolNames: string[];
+  effectiveToolCount: number;
+  effectiveToolNames?: string[];
+  hasToolRestriction: boolean;
+
+  relatedBackends: RelatedResource[];
+  relatedPolicies: RelatedResource[];
+  relatedRoutes: RelatedResource[];
+  relatedGateways: RelatedResource[];
+  relatedAgents: RelatedResource[];
+  relatedServices: RelatedResource[];
+
+  routedThroughGateway: boolean;
+  hasTLS: boolean;
+  hasAuth: boolean;
+  hasJWT: boolean;
+  jwtMode?: string;
+  hasRBAC: boolean;
+  hasCORS: boolean;
+  hasRateLimit: boolean;
+  hasPromptGuard: boolean;
+
+  score: number;
+  grade: string;
+  status: 'compliant' | 'warning' | 'failing' | 'critical';
+  findings: Finding[];
+  scoreBreakdown: MCPServerScoreBreakdown;
+  scoreExplanations?: ScoreExplanation[];
+}
+
+export interface MCPServerSummary {
+  totalMCPServers: number;
+  routedServers: number;
+  unroutedServers: number;
+  securedServers: number;
+  atRiskServers: number;
+  criticalServers: number;
+  totalTools: number;
+  exposedTools: number;
+  averageScore: number;
+}
+
+export interface MCPServersResponse {
+  servers: MCPServerView[];
+  summary: MCPServerSummary;
+}

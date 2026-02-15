@@ -53,6 +53,7 @@ export default function ScoreGauge({ score, grade, phase }: ScoreGaugeProps) {
 
   return (
     <div className="flex flex-col items-center justify-center p-8 bg-gov-surface rounded-2xl border border-gov-border card-hover glow-accent">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-gov-text-3 mb-3">Cluster Governance Score</h3>
       <div className="relative">
         <svg width="220" height="220" viewBox="0 0 220 220" className="transform -rotate-90">
           {/* Background circle */}

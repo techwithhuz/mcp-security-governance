@@ -36,6 +36,10 @@ var (
 	aiBackoff     time.Duration
 	aiMinInterval = 5 * time.Minute // default; overridden by policy.AIScanInterval
 	aiScanPaused  bool              // runtime pause flag (toggled via API)
+
+	// Governance scan state
+	lastScanTime  time.Time  // when the last governance scan completed
+	scanInterval  = 5 * time.Minute // default; overridden by policy.ScanInterval
 )
 
 func main() {
@@ -75,30 +79,23 @@ func main() {
 		initAIAgent(context.Background())
 	}
 
-	// Periodic re-evaluation
+	// Parse scan interval from policy
+	if policy.ScanInterval != "" {
+		if d, err := time.ParseDuration(policy.ScanInterval); err == nil && d >= 30*time.Second {
+			scanInterval = d
+		} else {
+			log.Printf("[governance] Invalid scanInterval %q, using default %v", policy.ScanInterval, scanInterval)
+		}
+	}
+	lastScanTime = time.Now()
+	log.Printf("[governance] Scan interval set to %v (configurable via spec.scanInterval in MCPGovernancePolicy)", scanInterval)
+
+	// Periodic re-evaluation using policy-driven interval
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(scanInterval)
+		defer ticker.Stop()
 		for range ticker.C {
-			cs := doDiscovery()
-			p := loadPolicy()
-			res := evaluator.Evaluate(cs.FilterByNamespaces(p.TargetNamespaces, p.ExcludeNamespaces), p)
-
-			stateMu.Lock()
-			currentState = cs
-			policy = p
-			lastCluster = cs
-			lastResult = res
-			stateMu.Unlock()
-
-			recordTrendPoint(res)
-			updatePolicyStatus(p.Name, res)
-			updateEvaluationStatus(p.Name, res)
-			log.Printf("[governance] Re-evaluated cluster. Score: %d, Findings: %d", res.Score, len(res.Findings))
-
-			// Run AI agent evaluation if enabled
-			if p.EnableAIAgent {
-				runAIEvaluation(context.Background(), cs, p, res)
-			}
+			doPeriodicScan()
 		}
 	}()
 
@@ -116,6 +113,13 @@ func main() {
 	mux.HandleFunc("/api/governance/ai-score", handleAIScore)
 	mux.HandleFunc("/api/governance/ai-score/refresh", handleAIRefresh)
 	mux.HandleFunc("/api/governance/ai-score/toggle", handleAIToggle)
+	// MCP-server-centric endpoints
+	mux.HandleFunc("/api/governance/mcp-servers", handleMCPServers)
+	mux.HandleFunc("/api/governance/mcp-servers/summary", handleMCPServerSummary)
+	mux.HandleFunc("/api/governance/mcp-servers/detail", handleMCPServerDetail)
+	// Scan management endpoints
+	mux.HandleFunc("/api/governance/scan/refresh", handleRefreshScan)
+	mux.HandleFunc("/api/governance/scan/status", handleScanStatus)
 
 	// CORS middleware
 	handler := corsMiddleware(mux)
@@ -163,7 +167,16 @@ func getSnapshot() stateSnapshot {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	jsonResponse(w, map[string]string{"status": "healthy", "version": Version})
+	stateMu.RLock()
+	scanTime := lastScanTime
+	interval := scanInterval
+	stateMu.RUnlock()
+	jsonResponse(w, map[string]interface{}{
+		"status":       "healthy",
+		"version":      Version,
+		"lastScanTime": scanTime.Format(time.RFC3339),
+		"scanInterval": interval.String(),
+	})
 }
 
 func getGrade(score int) string {
@@ -200,63 +213,92 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, map[string]interface{}{"score": 0, "grade": "F", "phase": "Unknown"})
 		return
 	}
-	type categoryDetail struct {
-		Category    string  `json:"category"`
-		Score       int     `json:"score"`
-		Weight      int     `json:"weight"`
-		Weighted    float64 `json:"weighted"`
-		Status      string  `json:"status"`
-		InfraAbsent bool    `json:"infraAbsent"`
+	type serverContribution struct {
+		Name  string `json:"name"`
+		Score int    `json:"score"`
+		Grade string `json:"grade"`
 	}
-	// Build explanation of how each category contributes
+	type categoryDetail struct {
+		Category    string               `json:"category"`
+		Score       int                  `json:"score"`
+		Weight      int                  `json:"weight"`
+		Weighted    float64              `json:"weighted"`
+		Status      string               `json:"status"`
+		InfraAbsent bool                 `json:"infraAbsent"`
+		Servers     []serverContribution `json:"servers"` // per-server scores for this category
+	}
+
+	// Mapping from category display name to MCPServerScoreBreakdown field getter
+	type catDef struct {
+		Name     string
+		Required bool
+		Weight   int
+		ClScore  int
+		GetScore func(v evaluator.MCPServerView) int
+	}
+
 	pw := snap.policy.Weights
+	bd := snap.result.ScoreBreakdown
+
+	allCats := []catDef{
+		{"AgentGateway Compliance", snap.policy.RequireAgentGateway, pw.AgentGatewayIntegration, bd.AgentGatewayScore,
+			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.GatewayRouting }},
+		{"Authentication", snap.policy.RequireJWTAuth, pw.Authentication, bd.AuthenticationScore,
+			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.Authentication }},
+		{"Authorization", snap.policy.RequireRBAC, pw.Authorization, bd.AuthorizationScore,
+			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.Authorization }},
+		{"CORS", snap.policy.RequireCORS, pw.CORSPolicy, bd.CORSScore,
+			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.CORS }},
+		{"TLS", snap.policy.RequireTLS, pw.TLSEncryption, bd.TLSScore,
+			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.TLS }},
+		{"Prompt Guard", snap.policy.RequirePromptGuard, pw.PromptGuard, bd.PromptGuardScore,
+			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.PromptGuard }},
+		{"Rate Limit", snap.policy.RequireRateLimit, pw.RateLimit, bd.RateLimitScore,
+			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.RateLimit }},
+		{"Tool Scope", snap.policy.MaxToolsWarning > 0 || snap.policy.MaxToolsCritical > 0, pw.ToolScope, bd.ToolScopeScore,
+			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.ToolScope }},
+	}
+
 	totalWeight := 0
 	var cats []categoryDetail
-	
-	bd := snap.result.ScoreBreakdown
-	
-	if snap.policy.RequireAgentGateway {
-		totalWeight += pw.AgentGatewayIntegration
-		cats = append(cats, categoryDetail{"AgentGateway Compliance", bd.AgentGatewayScore, pw.AgentGatewayIntegration, 0, statusLabel(bd.AgentGatewayScore), bd.InfraAbsent["AgentGateway Compliance"]})
+
+	for _, c := range allCats {
+		if !c.Required {
+			continue
+		}
+		totalWeight += c.Weight
+
+		// Collect per-server scores for this category
+		var servers []serverContribution
+		for _, v := range snap.result.MCPServerViews {
+			s := c.GetScore(v)
+			servers = append(servers, serverContribution{
+				Name:  v.Name,
+				Score: s,
+				Grade: getGrade(s),
+			})
+		}
+
+		cats = append(cats, categoryDetail{
+			Category:    c.Name,
+			Score:       c.ClScore,
+			Weight:      c.Weight,
+			Status:      statusLabel(c.ClScore),
+			InfraAbsent: bd.InfraAbsent[c.Name],
+			Servers:     servers,
+		})
 	}
-	if snap.policy.RequireJWTAuth {
-		totalWeight += pw.Authentication
-		cats = append(cats, categoryDetail{"Authentication", bd.AuthenticationScore, pw.Authentication, 0, statusLabel(bd.AuthenticationScore), bd.InfraAbsent["Authentication"]})
-	}
-	if snap.policy.RequireRBAC {
-		totalWeight += pw.Authorization
-		cats = append(cats, categoryDetail{"Authorization", bd.AuthorizationScore, pw.Authorization, 0, statusLabel(bd.AuthorizationScore), bd.InfraAbsent["Authorization"]})
-	}
-	if snap.policy.RequireCORS {
-		totalWeight += pw.CORSPolicy
-		cats = append(cats, categoryDetail{"CORS", bd.CORSScore, pw.CORSPolicy, 0, statusLabel(bd.CORSScore), bd.InfraAbsent["CORS"]})
-	}
-	if snap.policy.RequireTLS {
-		totalWeight += pw.TLSEncryption
-		cats = append(cats, categoryDetail{"TLS", bd.TLSScore, pw.TLSEncryption, 0, statusLabel(bd.TLSScore), bd.InfraAbsent["TLS"]})
-	}
-	if snap.policy.RequirePromptGuard {
-		totalWeight += pw.PromptGuard
-		cats = append(cats, categoryDetail{"Prompt Guard", bd.PromptGuardScore, pw.PromptGuard, 0, statusLabel(bd.PromptGuardScore), bd.InfraAbsent["Prompt Guard"]})
-	}
-	if snap.policy.RequireRateLimit {
-		totalWeight += pw.RateLimit
-		cats = append(cats, categoryDetail{"Rate Limit", bd.RateLimitScore, pw.RateLimit, 0, statusLabel(bd.RateLimitScore), bd.InfraAbsent["Rate Limit"]})
-	}
-	if snap.policy.MaxToolsWarning > 0 || snap.policy.MaxToolsCritical > 0 {
-		totalWeight += pw.ToolScope
-		cats = append(cats, categoryDetail{"Tool Scope", bd.ToolScopeScore, pw.ToolScope, 0, statusLabel(bd.ToolScopeScore), bd.InfraAbsent["Tool Scope"]})
-	}
-	
+
 	if totalWeight == 0 {
 		totalWeight = 100
 	}
-	
+
 	// Recalculate weighted scores with correct totalWeight
 	for i := range cats {
 		cats[i].Weighted = float64(cats[i].Score*cats[i].Weight) / float64(totalWeight)
 	}
 
+	numServers := len(snap.result.MCPServerViews)
 	response := map[string]interface{}{
 		"score":      snap.result.Score,
 		"grade":      getGrade(snap.result.Score),
@@ -270,8 +312,8 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 			"Low":      snap.policy.SeverityPenalties.Low,
 		},
 		"explanation": fmt.Sprintf(
-			"Score is a weighted average of %d governance categories. Each category is scored 0-100 based on findings (Critical: -%dpts, High: -%dpts, Medium: -%dpts, Low: -%dpts). The final score %d/100 = Grade %s.",
-			len(cats), snap.policy.SeverityPenalties.Critical, snap.policy.SeverityPenalties.High, snap.policy.SeverityPenalties.Medium, snap.policy.SeverityPenalties.Low, snap.result.Score, getGrade(snap.result.Score)),
+			"Score is a weighted average of %d governance categories. Each category score is the average across %d MCP server(s). The final score %d/100 = Grade %s.",
+			len(cats), numServers, snap.result.Score, getGrade(snap.result.Score)),
 		"aiAgentEnabled": snap.policy.EnableAIAgent,
 	}
 
@@ -893,6 +935,124 @@ func handleAIToggle(w http.ResponseWriter, r *http.Request) {
 		"scanPaused": paused,
 		"message":    fmt.Sprintf("AI periodic scanning %s", status),
 	})
+}
+
+// ---------- MCP Server Endpoints ----------
+
+// doPeriodicScan runs a full governance scan and updates all state
+func doPeriodicScan() {
+	cs := doDiscovery()
+	p := loadPolicy()
+	res := evaluator.Evaluate(cs.FilterByNamespaces(p.TargetNamespaces, p.ExcludeNamespaces), p)
+
+	stateMu.Lock()
+	currentState = cs
+	policy = p
+	lastCluster = cs
+	lastResult = res
+	lastScanTime = time.Now()
+	stateMu.Unlock()
+
+	recordTrendPoint(res)
+	updatePolicyStatus(p.Name, res)
+	updateEvaluationStatus(p.Name, res)
+	log.Printf("[governance] Scan complete. Score: %d, Findings: %d, MCP Servers: %d", res.Score, len(res.Findings), len(res.MCPServerViews))
+
+	// Run AI agent evaluation if enabled
+	if p.EnableAIAgent {
+		runAIEvaluation(context.Background(), cs, p, res)
+	}
+}
+
+// handleRefreshScan triggers an on-demand governance scan (POST only)
+func handleRefreshScan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	log.Printf("[governance] On-demand scan triggered via API")
+	doPeriodicScan()
+
+	stateMu.RLock()
+	result := lastResult
+	scanTime := lastScanTime
+	stateMu.RUnlock()
+
+	jsonResponse(w, map[string]interface{}{
+		"status":       "completed",
+		"score":        result.Score,
+		"findings":     len(result.Findings),
+		"mcpServers":   len(result.MCPServerViews),
+		"lastScanTime": scanTime.Format(time.RFC3339),
+	})
+}
+
+// handleScanStatus returns the current scan status and interval
+func handleScanStatus(w http.ResponseWriter, r *http.Request) {
+	stateMu.RLock()
+	scanTime := lastScanTime
+	interval := scanInterval
+	p := policy
+	stateMu.RUnlock()
+
+	nextScan := scanTime.Add(interval)
+	jsonResponse(w, map[string]interface{}{
+		"lastScanTime":     scanTime.Format(time.RFC3339),
+		"scanInterval":     interval.String(),
+		"nextScanTime":     nextScan.Format(time.RFC3339),
+		"scanIntervalSpec": p.ScanInterval,
+	})
+}
+
+// handleMCPServers returns all MCP server views with their scores and related resources
+func handleMCPServers(w http.ResponseWriter, r *http.Request) {
+	snap := getSnapshot()
+	if snap.result == nil {
+		jsonResponse(w, map[string]interface{}{
+			"servers": []evaluator.MCPServerView{},
+			"summary": evaluator.MCPServerSummary{},
+		})
+		return
+	}
+	jsonResponse(w, map[string]interface{}{
+		"servers": snap.result.MCPServerViews,
+		"summary": snap.result.MCPServerSummary,
+	})
+}
+
+// handleMCPServerSummary returns only the cluster-level MCP server summary
+func handleMCPServerSummary(w http.ResponseWriter, r *http.Request) {
+	snap := getSnapshot()
+	if snap.result == nil {
+		jsonResponse(w, evaluator.MCPServerSummary{})
+		return
+	}
+	jsonResponse(w, snap.result.MCPServerSummary)
+}
+
+// handleMCPServerDetail returns detailed info for a single MCP server by ID
+func handleMCPServerDetail(w http.ResponseWriter, r *http.Request) {
+	snap := getSnapshot()
+	if snap.result == nil {
+		http.Error(w, "No evaluation available", http.StatusServiceUnavailable)
+		return
+	}
+
+	serverID := r.URL.Query().Get("id")
+	if serverID == "" {
+		http.Error(w, "Missing 'id' query parameter", http.StatusBadRequest)
+		return
+	}
+
+	for _, view := range snap.result.MCPServerViews {
+		if view.ID == serverID {
+			jsonResponse(w, view)
+			return
+		}
+	}
+
+	http.Error(w, "MCP server not found", http.StatusNotFound)
 }
 
 // discoverClusterState is the fallback simulated discovery

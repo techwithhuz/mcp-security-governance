@@ -263,7 +263,20 @@ func (d *K8sDiscoverer) discoverAgentgatewayBackends(ctx context.Context) []eval
 
 		spec, _ := getNestedMap(item.Object, "spec")
 		if spec != nil {
+			// Infer backend type from which sub-field is present.
+			// The CRD uses one-of: mcp, ai, static, dynamicForwardProxy
 			b.BackendType, _ = getNestedString(spec, "type")
+			if b.BackendType == "" {
+				if _, ok := spec["mcp"]; ok {
+					b.BackendType = "mcp"
+				} else if _, ok := spec["ai"]; ok {
+					b.BackendType = "ai"
+				} else if _, ok := spec["static"]; ok {
+					b.BackendType = "static"
+				} else if _, ok := spec["dynamicForwardProxy"]; ok {
+					b.BackendType = "dynamicForwardProxy"
+				}
+			}
 
 			// Check MCP targets
 			mcp, _ := getNestedMap(spec, "mcp")
@@ -276,9 +289,26 @@ func (d *K8sDiscoverer) discoverAgentgatewayBackends(ctx context.Context) []eval
 					}
 					target := evaluator.MCPTargetInfo{}
 					target.Name, _ = getNestedString(tm, "name")
+
+					// Host/port/protocol can be at the target level (old format)
+					// or nested under "static" (current CRD format)
 					target.Host, _ = getNestedString(tm, "host")
 					port, _ := getNestedInt(tm, "port")
 					target.Port = int(port)
+					target.Protocol, _ = getNestedString(tm, "protocol")
+
+					staticObj, _ := getNestedMap(tm, "static")
+					if staticObj != nil {
+						if h, _ := getNestedString(staticObj, "host"); h != "" {
+							target.Host = h
+						}
+						if p, _ := getNestedInt(staticObj, "port"); p > 0 {
+							target.Port = int(p)
+						}
+						if proto, _ := getNestedString(staticObj, "protocol"); proto != "" {
+							target.Protocol = proto
+						}
+					}
 
 					// Check for auth config
 					auth, _ := getNestedMap(tm, "authentication")
@@ -333,24 +363,40 @@ func (d *K8sDiscoverer) discoverAgentgatewayPolicies(ctx context.Context) []eval
 
 		spec, _ := getNestedMap(item.Object, "spec")
 		if spec != nil {
-			// Target refs
-			targetRef, _ := getNestedMap(spec, "targetRef")
-			if targetRef != nil {
+			// Target refs (plural - current CRD format)
+			targetRefs, _ := getNestedSlice(spec, "targetRefs")
+			for _, ref := range targetRefs {
+				rm, ok := ref.(map[string]interface{})
+				if !ok {
+					continue
+				}
 				tr := evaluator.PolicyTargetRef{}
-				tr.Group, _ = getNestedString(targetRef, "group")
-				tr.Kind, _ = getNestedString(targetRef, "kind")
-				tr.Name, _ = getNestedString(targetRef, "name")
+				tr.Group, _ = getNestedString(rm, "group")
+				tr.Kind, _ = getNestedString(rm, "kind")
+				tr.Name, _ = getNestedString(rm, "name")
 				p.TargetRefs = append(p.TargetRefs, tr)
 			}
 
-			// Check default policies
-			defaults, _ := getNestedMap(spec, "default")
-			if defaults != nil {
+			// Fallback: targetRef (singular - old format)
+			if len(p.TargetRefs) == 0 {
+				targetRef, _ := getNestedMap(spec, "targetRef")
+				if targetRef != nil {
+					tr := evaluator.PolicyTargetRef{}
+					tr.Group, _ = getNestedString(targetRef, "group")
+					tr.Kind, _ = getNestedString(targetRef, "kind")
+					tr.Name, _ = getNestedString(targetRef, "name")
+					p.TargetRefs = append(p.TargetRefs, tr)
+				}
+			}
+
+			// Parse traffic section (current CRD format)
+			traffic, _ := getNestedMap(spec, "traffic")
+			if traffic != nil {
 				// JWT
-				jwt, _ := getNestedMap(defaults, "jwt")
+				jwt, _ := getNestedMap(traffic, "jwtAuthentication")
 				if jwt != nil {
 					p.HasJWT = true
-					p.JWTMode = "Strict" // default
+					p.JWTMode = "Strict"
 					mode, _ := getNestedString(jwt, "mode")
 					if mode != "" {
 						p.JWTMode = mode
@@ -358,33 +404,102 @@ func (d *K8sDiscoverer) discoverAgentgatewayPolicies(ctx context.Context) []eval
 				}
 
 				// CORS
-				cors, _ := getNestedMap(defaults, "cors")
+				cors, _ := getNestedMap(traffic, "cors")
 				if cors != nil {
 					p.HasCORS = true
 				}
 
 				// CSRF
-				csrf, _ := getNestedMap(defaults, "csrf")
+				csrf, _ := getNestedMap(traffic, "csrf")
 				if csrf != nil {
 					p.HasCSRF = true
 				}
 
 				// Rate limit
-				rateLimit, _ := getNestedMap(defaults, "rateLimit")
+				rateLimit, _ := getNestedMap(traffic, "rateLimit")
 				if rateLimit != nil {
 					p.HasRateLimit = true
 				}
 
-				// RBAC
+				// Authorization (RBAC) + extract allowed tools from CEL expressions
+				authz, _ := getNestedMap(traffic, "authorization")
+				if authz != nil {
+					p.HasRBAC = true
+					action, _ := getNestedString(authz, "action")
+					if action == "Allow" {
+						policy, _ := getNestedMap(authz, "policy")
+						if policy != nil {
+							exprs, _ := getNestedSlice(policy, "matchExpressions")
+							for _, expr := range exprs {
+								exprStr, ok := expr.(string)
+								if !ok {
+									continue
+								}
+								// Extract tool names from CEL like:
+								// "mcp.tool.name in ['tool1', 'tool2', ...]"
+								tools := extractToolNamesFromCEL(exprStr)
+								p.AllowedTools = append(p.AllowedTools, tools...)
+							}
+						}
+					}
+				}
+
+				// Prompt guard
+				pg, _ := getNestedMap(traffic, "promptGuard")
+				if pg != nil {
+					p.HasPromptGuard = true
+				}
+
+				// External auth (also serves as prompt guard/screening service)
+				extAuth, _ := getNestedMap(traffic, "extAuth")
+				if extAuth != nil {
+					p.HasExtAuth = true
+				}
+			}
+
+			// Fallback: check default section (old format)
+			defaults, _ := getNestedMap(spec, "default")
+			if defaults != nil {
+				jwt, _ := getNestedMap(defaults, "jwt")
+				if jwt != nil {
+					p.HasJWT = true
+					p.JWTMode = "Strict"
+					mode, _ := getNestedString(jwt, "mode")
+					if mode != "" {
+						p.JWTMode = mode
+					}
+				}
+				cors, _ := getNestedMap(defaults, "cors")
+				if cors != nil {
+					p.HasCORS = true
+				}
+				csrf, _ := getNestedMap(defaults, "csrf")
+				if csrf != nil {
+					p.HasCSRF = true
+				}
+				rateLimit, _ := getNestedMap(defaults, "rateLimit")
+				if rateLimit != nil {
+					p.HasRateLimit = true
+				}
 				rbac, _ := getNestedMap(defaults, "rbac")
 				if rbac != nil {
 					p.HasRBAC = true
 				}
-
-				// Prompt guard
 				pg, _ := getNestedMap(defaults, "promptGuard")
 				if pg != nil {
 					p.HasPromptGuard = true
+				}
+			}
+
+			// Check backend.ai.promptGuard (agentgateway CRD format)
+			backend, _ := getNestedMap(spec, "backend")
+			if backend != nil {
+				ai, _ := getNestedMap(backend, "ai")
+				if ai != nil {
+					pg, _ := getNestedMap(ai, "promptGuard")
+					if pg != nil {
+						p.HasPromptGuard = true
+					}
 				}
 			}
 		}
@@ -552,12 +667,22 @@ func (d *K8sDiscoverer) discoverKagentRemoteMCPServers(ctx context.Context) []ev
 			s.URL, _ = getNestedString(spec, "url")
 		}
 
-		// Count discovered tools from status
+		// Count discovered tools from status and collect tool names
 		status, _ := getNestedMap(item.Object, "status")
 		if status != nil {
 			discoveredTools, ok := getNestedSlice(status, "discoveredTools")
 			if ok {
 				s.ToolCount = len(discoveredTools)
+				for _, dt := range discoveredTools {
+					dtMap, ok := dt.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					toolName, _ := getNestedString(dtMap, "name")
+					if toolName != "" {
+						s.ToolNames = append(s.ToolNames, toolName)
+					}
+				}
 			}
 		}
 
@@ -663,6 +788,11 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 	}
 	if val, ok := spec["requireRateLimit"].(bool); ok {
 		policy.RequireRateLimit = val
+	}
+
+	// Parse governance scan interval
+	if val, ok := spec["scanInterval"].(string); ok {
+		policy.ScanInterval = val
 	}
 
 	// Parse AI agent configuration
@@ -1014,3 +1144,31 @@ func getNestedSlice(obj map[string]interface{}, key string) ([]interface{}, bool
 
 // Silence unused import warning
 var _ = unstructured.Unstructured{}
+
+// extractToolNamesFromCEL parses tool names from CEL expressions like:
+//   "mcp.tool.name in ['tool1', 'tool2', 'tool3']"
+// Returns the list of tool names found.
+func extractToolNamesFromCEL(expr string) []string {
+	// Look for patterns like mcp.tool.name in [...]
+	if !strings.Contains(expr, "mcp.tool.name") {
+		return nil
+	}
+	// Find the list part between [ and ]
+	start := strings.Index(expr, "[")
+	end := strings.LastIndex(expr, "]")
+	if start < 0 || end < 0 || end <= start {
+		return nil
+	}
+	listContent := expr[start+1 : end]
+
+	var tools []string
+	for _, part := range strings.Split(listContent, ",") {
+		part = strings.TrimSpace(part)
+		// Remove surrounding quotes (single or double)
+		part = strings.Trim(part, "'\"")
+		if part != "" {
+			tools = append(tools, part)
+		}
+	}
+	return tools
+}

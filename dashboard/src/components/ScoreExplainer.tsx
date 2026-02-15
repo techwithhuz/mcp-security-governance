@@ -24,6 +24,7 @@ interface ScoreCategory {
   weighted: number;
   status: string;
   infraAbsent?: boolean;
+  servers?: { name: string; score: number; grade: string }[];
 }
 
 interface ScoreExplainerProps {

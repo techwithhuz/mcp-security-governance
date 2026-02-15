@@ -1,0 +1,120 @@
+---
+# ============================================
+# AGENTGATEWAY RESOURCES FOR kagent-grafana-mcp
+# Routes the existing RemoteMCPServer through
+# an AgentGateway for governance compliance
+# ============================================
+
+# AgentgatewayBackend pointing to the kagent-grafana-mcp service
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: kagent-grafana-mcp-backend
+  namespace: kagent
+spec:
+  mcp:
+    targets:
+      - name: kagent-grafana-mcp
+        static:
+          host: kagent-grafana-mcp.kagent.svc.cluster.local
+          port: 8000
+          path: /mcp
+          protocol: StreamableHTTP
+  policies:
+    tls:
+      sni: kagent-grafana-mcp.kagent.svc.cluster.local
+
+---
+# HTTPRoute routing /mcp/grafana traffic through the AgentgatewayBackend
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kagent-grafana-mcp-route
+  namespace: kagent
+spec:
+  parentRefs:
+    - name: kagent-mcp-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp/grafana
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: kagent-grafana-mcp-backend
+
+---
+# AgentgatewayPolicy - Full security stack for kagent-grafana-mcp
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: kagent-grafana-mcp-access-policy
+  namespace: kagent
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: kagent-grafana-mcp-route
+  traffic:
+    # JWT Authentication
+    jwtAuthentication:
+      mode: Strict
+      providers:
+        - issuer: https://auth.mcp-governance.io
+          audiences:
+            - mcp-agents
+            - kagent-grafana
+          jwks:
+            inline: '{"keys":[{"kty":"RSA","use":"sig","kid":"mcp-governance-key-1","n":"0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw","e":"AQAB"}]}'
+    # CORS Policy
+    cors:
+      allowOrigins:
+        - "https://dashboard.mcp-governance.io"
+      allowMethods:
+        - GET
+        - POST
+        - OPTIONS
+      allowHeaders:
+        - Authorization
+        - Content-Type
+        - X-MCP-Session-Id
+      exposeHeaders:
+        - X-MCP-Request-Id
+      maxAge: 3600
+      allowCredentials: true
+    # Rate Limiting (local)
+    rateLimit:
+      local:
+        - unit: Minutes
+          requests: 120
+          burst: 30
+    # Authorization - Allow only 10 specific Grafana tools
+    authorization:
+      action: Allow
+      policy:
+        matchExpressions:
+          - "mcp.tool.name in ['get_dashboard_by_uid', 'get_dashboard_summary', 'search_dashboards', 'list_datasources', 'query_prometheus', 'query_loki_logs', 'list_alert_rules', 'get_annotations', 'list_incidents', 'get_panel_image']"
+  # Prompt Guard - Block prompt injection and mask sensitive data
+  backend:
+    ai:
+      promptGuard:
+        request:
+          - response:
+              message: "Blocked: Prompt injection or sensitive content detected"
+            regex:
+              action: Reject
+              matches:
+                - "ignore previous instructions"
+                - "system prompt"
+                - "jailbreak"
+              builtins:
+                - CreditCard
+                - Ssn
+        response:
+          - regex:
+              action: Mask
+              builtins:
+                - CreditCard
+                - Ssn
+                - Email

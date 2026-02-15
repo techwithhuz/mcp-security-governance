@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Image from 'next/image';
-import { Shield, RefreshCw, Activity, Clock, AlertTriangle, CheckCircle2, Wifi, WifiOff, Server, ChevronRight } from 'lucide-react';
+import { Shield, RefreshCw, Activity, Clock, AlertTriangle, Wifi, WifiOff, Server, ChevronRight, Plug, Scan, Wrench } from 'lucide-react';
 import ScoreGauge from '@/components/ScoreGauge';
 import ResourceCards from '@/components/ResourceCards';
 import FindingsTable from '@/components/FindingsTable';
@@ -11,6 +11,9 @@ import TrendChart from '@/components/TrendChart';
 import ScoreExplainer from '@/components/ScoreExplainer';
 import ResourceInventory from '@/components/ResourceInventory';
 import AIScoreCard from '@/components/AIScoreCard';
+import MCPServerList from '@/components/MCPServerList';
+import MCPServerDetail from '@/components/MCPServerDetail';
+import type { MCPServerView, MCPServerSummary, MCPServersResponse } from '@/lib/types';
 
 interface DashboardData {
   score: { score: number; grade: string; phase: string; categories: any[]; explanation: string; severityPenalties?: { Critical: number; High: number; Medium: number; Low: number } };
@@ -19,36 +22,54 @@ interface DashboardData {
   breakdown: any;
   trends: { trends: any[] };
   resourceDetail: { resources: any[]; total: number };
+  mcpServers: MCPServersResponse;
 }
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'resources' | 'findings'>('overview');
+  const [activeTab, setActiveTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings'>('overview');
   const [version, setVersion] = useState('');
+  const [selectedMCPServer, setSelectedMCPServer] = useState<MCPServerView | null>(null);
+  const [previousTab, setPreviousTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | null>(null);
+  const [lastScanTime, setLastScanTime] = useState<string>('');
+  const [scanInterval, setScanInterval] = useState<string>('');
+  const [scanning, setScanning] = useState(false);
+
+  // Use a ref for selectedMCPServer inside fetchData so it doesn't cause re-fetch cascades
+  const selectedMCPServerRef = useRef<MCPServerView | null>(null);
+  useEffect(() => { selectedMCPServerRef.current = selectedMCPServer; }, [selectedMCPServer]);
 
   const fetchData = useCallback(async () => {
     try {
       setRefreshing(true);
-      const [score, findings, resources, breakdown, trends, resourceDetail, health] = await Promise.all([
+      const [score, findings, resources, breakdown, trends, resourceDetail, mcpServers, health] = await Promise.all([
         fetch('/api/governance/score').then(r => r.json()),
         fetch('/api/governance/findings').then(r => r.json()),
         fetch('/api/governance/resources').then(r => r.json()),
         fetch('/api/governance/breakdown').then(r => r.json()),
         fetch('/api/governance/trends').then(r => r.json()),
         fetch('/api/governance/resources/detail').then(r => r.json()),
+        fetch('/api/governance/mcp-servers').then(r => r.json()).catch(() => ({ servers: [], summary: {} })),
         fetch('/api/health').then(r => r.json()).catch(() => null),
       ]);
 
       if (health?.version) setVersion(health.version);
-      setData({ score, findings, resources, breakdown, trends, resourceDetail });
-      setLastUpdated(new Date());
+      if (health?.lastScanTime) setLastScanTime(health.lastScanTime);
+      if (health?.scanInterval) setScanInterval(health.scanInterval);
+      setData({ score, findings, resources, breakdown, trends, resourceDetail, mcpServers });
       setConnected(true);
       setError(null);
+
+      // Update selected MCP server data if one is selected
+      const currentSelected = selectedMCPServerRef.current;
+      if (currentSelected && mcpServers?.servers) {
+        const updated = mcpServers.servers.find((s: MCPServerView) => s.id === currentSelected.id);
+        if (updated) setSelectedMCPServer(updated);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to connect to governance API');
       setConnected(false);
@@ -58,9 +79,21 @@ export default function Dashboard() {
     }
   }, []);
 
+  const triggerScan = useCallback(async () => {
+    try {
+      setScanning(true);
+      await fetch('/api/governance/scan/refresh', { method: 'POST' });
+      await fetchData();
+    } catch (err) {
+      console.error('Scan failed:', err);
+    } finally {
+      setScanning(false);
+    }
+  }, [fetchData]);
+
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 15000);
+    const interval = setInterval(fetchData, 30000); // refresh UI data every 30s
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -109,6 +142,29 @@ export default function Dashboard() {
 
   const failingResources = (data.resourceDetail.resources || []).filter((r: any) => r.status === 'critical' || r.status === 'failing');
   const compliantResources = (data.resourceDetail.resources || []).filter((r: any) => r.status === 'compliant');
+  const mcpServers: MCPServerView[] = data.mcpServers?.servers || [];
+  const mcpSummary: MCPServerSummary = data.mcpServers?.summary || {
+    totalMCPServers: 0, routedServers: 0, unroutedServers: 0,
+    securedServers: 0, atRiskServers: 0, criticalServers: 0,
+    totalTools: 0, exposedTools: 0, averageScore: 0,
+  };
+
+  // Compute total findings across all MCP servers (each server counts its own findings)
+  const mcpAggregatedFindings: any[] = [];
+  mcpServers.forEach(s => {
+    (s.findings || []).forEach((f: any) => {
+      mcpAggregatedFindings.push({
+        ...f,
+        id: `${f.id}-${s.name}`,
+        resourceRef: f.resourceRef || s.name,
+      });
+    });
+  });
+  const mcpTotalFindings = mcpAggregatedFindings.length;
+  const mcpFindingsBySeverity: Record<string, number> = {};
+  mcpAggregatedFindings.forEach((f: any) => {
+    mcpFindingsBySeverity[f.severity] = (mcpFindingsBySeverity[f.severity] || 0) + 1;
+  });
 
   return (
     <div className="min-h-screen">
@@ -116,7 +172,7 @@ export default function Dashboard() {
       <header className="sticky top-0 z-50 bg-gov-bg/80 backdrop-blur-xl border-b border-gov-border">
         <div className="max-w-[1600px] mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 cursor-pointer" onClick={() => { setActiveTab('overview'); setSelectedMCPServer(null); }}>
               <Image src="/logo.svg" alt="MCP Governance" width={44} height={44} className="drop-shadow-lg" />
               <div>
                 <h1 className="text-xl font-bold flex items-center gap-2">
@@ -146,12 +202,24 @@ export default function Dashboard() {
               </div>
 
               {/* Last updated */}
-              {lastUpdated && (
-                <div className="flex items-center gap-1.5 text-xs text-gov-text-3">
+              {lastScanTime && (
+                <div className="flex items-center gap-1.5 text-xs text-gov-text-3" title={`Scan interval: ${scanInterval || 'N/A'}`}>
                   <Clock className="w-3.5 h-3.5" />
-                  <span>{lastUpdated.toLocaleTimeString()}</span>
+                  <span>Scanned {new Date(lastScanTime).toLocaleTimeString()}</span>
+                  {scanInterval && <span className="text-gov-text-3/50">({scanInterval})</span>}
                 </div>
               )}
+
+              {/* Scan Now button */}
+              <button
+                onClick={triggerScan}
+                disabled={scanning}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gov-accent/10 border border-blue-500/30 hover:bg-gov-accent/20 transition-all disabled:opacity-50 text-xs font-medium text-blue-400"
+                title="Trigger an on-demand governance scan"
+              >
+                <Scan className={`w-3.5 h-3.5 ${scanning ? 'animate-spin' : ''}`} />
+                {scanning ? 'Scanning...' : 'Scan Now'}
+              </button>
 
               {/* Refresh button */}
               <button
@@ -168,12 +236,13 @@ export default function Dashboard() {
           <div className="flex gap-1 mt-4">
             {[
               { id: 'overview' as const, label: 'Overview', icon: Activity },
+              { id: 'mcp-servers' as const, label: 'MCP Servers', icon: Plug },
               { id: 'resources' as const, label: 'Resource Inventory', icon: Server },
               { id: 'findings' as const, label: 'All Findings', icon: AlertTriangle },
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => { setActiveTab(tab.id); setSelectedMCPServer(null); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   activeTab === tab.id
                     ? 'bg-gov-accent/15 text-blue-400 border border-blue-500/30'
@@ -182,6 +251,11 @@ export default function Dashboard() {
               >
                 <tab.icon size={14} />
                 {tab.label}
+                {tab.id === 'mcp-servers' && data.mcpServers?.summary?.totalMCPServers > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-blue-500/15 text-blue-400 font-bold tabular-nums">
+                    {data.mcpServers.summary.totalMCPServers}
+                  </span>
+                )}
                 {tab.id === 'resources' && (
                   <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-gov-bg font-bold tabular-nums">
                     {data.resourceDetail.total || 0}
@@ -189,7 +263,7 @@ export default function Dashboard() {
                 )}
                 {tab.id === 'findings' && (
                   <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-red-500/15 text-red-400 font-bold tabular-nums">
-                    {data.findings.total}
+                    {mcpTotalFindings}
                   </span>
                 )}
               </button>
@@ -201,10 +275,38 @@ export default function Dashboard() {
       {/* Main content */}
       <main className="max-w-[1600px] mx-auto px-6 py-6 space-y-6">
 
+        {/* ========== MCP SERVERS TAB ========== */}
+        {activeTab === 'mcp-servers' && (
+          selectedMCPServer ? (
+            <MCPServerDetail
+              server={selectedMCPServer}
+              onBack={() => {
+                setSelectedMCPServer(null);
+                if (previousTab && previousTab !== 'mcp-servers') {
+                  setActiveTab(previousTab);
+                  setPreviousTab(null);
+                }
+              }}
+            />
+          ) : (
+            <MCPServerList
+              servers={data.mcpServers?.servers || []}
+              summary={data.mcpServers?.summary || {
+                totalMCPServers: 0,
+                routedViaGateway: 0,
+                atRiskCount: 0,
+                averageScore: 0,
+                byStatus: { critical: 0, warning: 0, compliant: 0 },
+              }}
+              onSelectServer={(s) => { setPreviousTab(null); setSelectedMCPServer(s); }}
+            />
+          )
+        )}
+
         {/* ========== OVERVIEW TAB ========== */}
         {activeTab === 'overview' && (
           <>
-            {/* Top row: Score Gauge + Quick Stats */}
+            {/* Top row: Score Gauge + MCP Server Summary + Breakdown */}
             <div className="grid grid-cols-12 gap-6">
               {/* Score gauge */}
               <div className="col-span-3">
@@ -215,18 +317,63 @@ export default function Dashboard() {
                 />
               </div>
 
-              {/* Quick stats cards */}
+              {/* MCP-centric quick stats */}
               <div className="col-span-5">
                 <div className="grid grid-cols-2 gap-4 h-full">
+                  {/* MCP Servers */}
+                  <div
+                    className="bg-gov-surface rounded-2xl border border-gov-border p-5 card-hover flex flex-col cursor-pointer"
+                    onClick={() => setActiveTab('mcp-servers')}
+                  >
+                    <div className="flex items-center gap-2 text-gov-text-3 mb-1">
+                      <Plug className="w-4 h-4" />
+                      <span className="text-xs font-semibold uppercase tracking-wider">MCP Servers</span>
+                    </div>
+                    <div className="flex-1 flex items-center justify-center">
+                      <span className="text-6xl font-black">{mcpSummary.totalMCPServers}</span>
+                    </div>
+                    <div className="flex gap-3 justify-center mt-1">
+                      <span className="text-xs text-green-400">{mcpSummary.routedServers} routed</span>
+                      <span className="text-xs text-red-400">{mcpSummary.unroutedServers} unrouted</span>
+                    </div>
+                  </div>
+
+                  {/* MCP Servers At Risk */}
+                  <div
+                    className="bg-gov-surface rounded-2xl border border-gov-border p-5 card-hover flex flex-col cursor-pointer"
+                    onClick={() => setActiveTab('mcp-servers')}
+                  >
+                    <div className="flex items-center gap-2 text-gov-text-3 mb-1">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span className="text-xs font-semibold uppercase tracking-wider">MCP Servers At Risk</span>
+                    </div>
+                    <div className="flex-1 flex items-center justify-center">
+                      <span className="text-6xl font-black text-red-400">{mcpSummary.atRiskServers}</span>
+                      <span className="text-2xl text-gov-text-3 font-normal ml-1">/{mcpSummary.totalMCPServers}</span>
+                    </div>
+                    <div className="text-xs text-center mt-1">
+                      {mcpSummary.criticalServers > 0 ? (
+                        <span className="text-red-400">{mcpSummary.criticalServers} critical</span>
+                      ) : (
+                        <span className="text-green-400">No critical servers</span>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Total Findings */}
-                  <div className="bg-gov-surface rounded-2xl border border-gov-border p-5 card-hover flex flex-col justify-between">
-                    <div className="flex items-center gap-2 text-gov-text-3 mb-2">
+                  <div
+                    className="bg-gov-surface rounded-2xl border border-gov-border p-5 card-hover flex flex-col cursor-pointer"
+                    onClick={() => setActiveTab('findings')}
+                  >
+                    <div className="flex items-center gap-2 text-gov-text-3 mb-1">
                       <AlertTriangle className="w-4 h-4" />
                       <span className="text-xs font-semibold uppercase tracking-wider">Total Findings</span>
                     </div>
-                    <div className="text-4xl font-black">{data.findings.total}</div>
-                    <div className="flex gap-2 mt-2">
-                      {Object.entries(data.findings.bySeverity || {}).map(([sev, count]) => {
+                    <div className="flex-1 flex items-center justify-center">
+                      <span className="text-6xl font-black">{mcpTotalFindings}</span>
+                    </div>
+                    <div className="flex gap-2 justify-center mt-1">
+                      {Object.entries(mcpFindingsBySeverity).map(([sev, count]) => {
                         const colors: Record<string, string> = {
                           Critical: 'text-red-400',
                           High: 'text-orange-400',
@@ -242,46 +389,22 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {/* Resources at Risk */}
-                  <div className="bg-gov-surface rounded-2xl border border-gov-border p-5 card-hover flex flex-col justify-between">
-                    <div className="flex items-center gap-2 text-gov-text-3 mb-2">
-                      <Server className="w-4 h-4" />
-                      <span className="text-xs font-semibold uppercase tracking-wider">Resources</span>
+                  {/* Total Tools */}
+                  <div
+                    className="bg-gov-surface rounded-2xl border border-gov-border p-5 card-hover flex flex-col cursor-pointer"
+                    onClick={() => setActiveTab('mcp-servers')}
+                  >
+                    <div className="flex items-center gap-2 text-gov-text-3 mb-1">
+                      <Wrench className="w-4 h-4" />
+                      <span className="text-xs font-semibold uppercase tracking-wider">Tools Exposed</span>
                     </div>
-                    <div className="text-4xl font-black">
-                      <span className="text-red-400">{failingResources.length}</span>
-                      <span className="text-lg text-gov-text-3 font-normal">/{data.resourceDetail.total || 0}</span>
+                    <div className="flex-1 flex items-center justify-center">
+                      <span className="text-6xl font-black">{mcpSummary.exposedTools}</span>
+                      <span className="text-2xl text-gov-text-3 font-normal ml-1">/{mcpSummary.totalTools}</span>
                     </div>
-                    <div className="text-xs text-gov-text-3 mt-1">
-                      {failingResources.length > 0 ? (
-                        <span className="text-red-400">{failingResources.length} need attention</span>
-                      ) : (
-                        <span className="text-green-400">All resources compliant</span>
-                      )}
+                    <div className="text-xs text-center mt-1 text-gov-text-3">
+                      Across {mcpSummary.totalMCPServers} MCP server{mcpSummary.totalMCPServers !== 1 ? 's' : ''}
                     </div>
-                  </div>
-
-                  {/* MCP Endpoints */}
-                  <div className="bg-gov-surface rounded-2xl border border-gov-border p-5 card-hover flex flex-col justify-between">
-                    <div className="flex items-center gap-2 text-gov-text-3 mb-2">
-                      <Activity className="w-4 h-4" />
-                      <span className="text-xs font-semibold uppercase tracking-wider">MCP Endpoints</span>
-                    </div>
-                    <div className="text-4xl font-black">{data.resources.totalMCPEndpoints || 0}</div>
-                    <div className="text-xs text-gov-text-3 mt-1">discovered endpoints</div>
-                  </div>
-
-                  {/* Compliant Resources */}
-                  <div className="bg-gov-surface rounded-2xl border border-gov-border p-5 card-hover flex flex-col justify-between">
-                    <div className="flex items-center gap-2 text-gov-text-3 mb-2">
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span className="text-xs font-semibold uppercase tracking-wider">Compliant</span>
-                    </div>
-                    <div className="text-4xl font-black text-green-400">
-                      {compliantResources.length}
-                      <span className="text-lg text-gov-text-3 font-normal">/{data.resourceDetail.total || 0}</span>
-                    </div>
-                    <div className="text-xs text-gov-text-3 mt-1">resources passing all checks</div>
                   </div>
                 </div>
               </div>
@@ -291,6 +414,63 @@ export default function Dashboard() {
                 <BreakdownChart breakdown={data.breakdown} />
               </div>
             </div>
+
+            {/* MCP Servers Quick View */}
+            {mcpServers.length > 0 && (
+              <div className="bg-gov-surface rounded-2xl border border-gov-border p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Plug size={18} className="text-blue-400" />
+                    <h2 className="text-lg font-bold">MCP Servers</h2>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-500/15 text-blue-400">
+                      {mcpServers.length}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('mcp-servers')}
+                    className="flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
+                  >
+                    View All <ChevronRight size={14} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {mcpServers.slice(0, 6).map((s: MCPServerView) => {
+                    const scoreColor = s.score >= 70 ? '#22c55e' : s.score >= 50 ? '#eab308' : s.score >= 30 ? '#f97316' : '#ef4444';
+                    return (
+                      <div
+                        key={s.id}
+                        className="bg-gov-bg rounded-xl border border-gov-border p-4 hover:border-gov-border-light transition-all cursor-pointer"
+                        onClick={() => { setPreviousTab('overview'); setActiveTab('mcp-servers'); setSelectedMCPServer(s); }}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-semibold text-gov-text truncate max-w-[150px]">{s.name}</span>
+                          <div
+                            className="w-9 h-9 rounded-full flex items-center justify-center border-2 font-black text-sm tabular-nums"
+                            style={{ borderColor: scoreColor, color: scoreColor, backgroundColor: `${scoreColor}10` }}
+                          >
+                            {s.score}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-gov-text-3 mb-2">
+                          <span className="font-mono px-1.5 py-0.5 bg-gov-surface rounded">{s.source === 'KagentMCPServer' ? 'MCPServer' : 'RemoteMCPServer'}</span>
+                          <span>{s.namespace}</span>
+                        </div>
+                        <div className="flex gap-1.5 flex-wrap">
+                          {s.routedThroughGateway ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 font-semibold">Routed</span>
+                          ) : (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-semibold">Exposed</span>
+                          )}
+                          {s.hasJWT && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-semibold">JWT</span>}
+                          {s.hasTLS && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400 font-semibold">TLS</span>}
+                          {s.findings.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-semibold">{s.findings.length} findings</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Score Explanation — explains WHY score is 41 / Grade D */}
             <ScoreExplainer
@@ -378,7 +558,7 @@ export default function Dashboard() {
 
         {/* ========== FINDINGS TAB ========== */}
         {activeTab === 'findings' && (
-          <FindingsTable findings={data.findings.findings || []} />
+          <FindingsTable findings={mcpAggregatedFindings} />
         )}
 
         {/* Footer */}

@@ -169,6 +169,7 @@ type AgentgatewayPolicyResource struct {
 	HasRBAC    bool
 	HasPromptGuard bool
 	JWTMode    string // "Strict", "Optional", "Permissive"
+	AllowedTools []string // Tool names extracted from authorization CEL matchExpressions
 }
 
 type PolicyTargetRef struct {
@@ -215,6 +216,7 @@ type KagentRemoteMCPServerResource struct {
 	Namespace string
 	URL       string
 	ToolCount int
+	ToolNames []string
 }
 
 type ServiceResource struct {
@@ -247,6 +249,9 @@ type EvaluationResult struct {
 	ResourceSummary ResourceSummary
 	NamespaceScores []NamespaceScore
 	Timestamp       time.Time
+	// MCP-server-centric views
+	MCPServerViews   []MCPServerView  `json:"mcpServerViews"`
+	MCPServerSummary MCPServerSummary `json:"mcpServerSummary"`
 }
 
 type ScoreBreakdown struct {
@@ -305,6 +310,7 @@ type Policy struct {
 	OllamaEndpoint      string   // Ollama API endpoint (default: "http://localhost:11434")
 	AIScanInterval      string   // Interval between AI evaluations (e.g. "5m", "10m", "1h"); default: "5m"
 	AIScanEnabled       bool     // Whether periodic AI scanning is active (default: true)
+	ScanInterval        string   // Interval between governance scans (e.g. "5m", "10m", "1h"); default: "5m"
 	MaxToolsWarning     int // If MCP server has more than this many tools, generate Warning
 	MaxToolsCritical    int // If MCP server has more than this many tools, generate Critical
 	TargetNamespaces    []string // If non-empty, only evaluate resources in these namespaces
@@ -420,6 +426,38 @@ func Evaluate(state *ClusterState, policy Policy) *EvaluationResult {
 	if result.ResourceSummary.CompliantResources < 0 {
 		result.ResourceSummary.CompliantResources = 0
 	}
+
+	// 6. Build MCP-server-centric views
+	result.MCPServerViews = BuildMCPServerViews(state, result.Findings, policy)
+	result.MCPServerSummary = BuildMCPServerSummary(result.MCPServerViews)
+
+	// 7. Sync: remove findings that were suppressed by MCP-server-level correlation
+	// so the Findings tab and Resource Inventory stay consistent with MCP Server views.
+	suppressed := ComputeSuppressedFindingIDs(result.MCPServerViews, result.Findings)
+	if len(suppressed) > 0 {
+		result.Findings = FilterFindings(result.Findings, suppressed)
+
+		// Recalculate compliant/non-compliant counts with the filtered findings
+		result.ResourceSummary.NonCompliantResources = 0
+		for _, f := range result.Findings {
+			if f.Severity == SeverityCritical || f.Severity == SeverityHigh {
+				result.ResourceSummary.NonCompliantResources++
+			}
+		}
+		totalRes := result.ResourceSummary.AgentgatewayBackends +
+			result.ResourceSummary.KagentMCPServers +
+			result.ResourceSummary.KagentAgents +
+			result.ResourceSummary.KagentRemoteMCPServers
+		result.ResourceSummary.CompliantResources = totalRes - result.ResourceSummary.NonCompliantResources
+		if result.ResourceSummary.CompliantResources < 0 {
+			result.ResourceSummary.CompliantResources = 0
+		}
+	}
+
+	// 8. Recompute cluster-level ScoreBreakdown from MCP-server-centric views
+	// so the overview dashboard is consistent with per-server scores.
+	result.ScoreBreakdown = aggregateBreakdownFromMCPViews(result.MCPServerViews, policy)
+	result.Score = calculateOverallScore(result.ScoreBreakdown, policy.Weights, policy)
 
 	return result
 }
@@ -1179,6 +1217,93 @@ func calculateOverallScore(breakdown ScoreBreakdown, weights ScoringWeights, pol
 	}
 
 	return weightedScore / totalWeight
+}
+
+// aggregateBreakdownFromMCPViews computes the cluster-level ScoreBreakdown
+// by averaging the per-server MCPServerScoreBreakdown across all MCP server views.
+// This ensures the overview dashboard is consistent with the MCP-server-centric scores.
+func aggregateBreakdownFromMCPViews(views []MCPServerView, policy Policy) ScoreBreakdown {
+	n := len(views)
+	if n == 0 {
+		return ScoreBreakdown{}
+	}
+
+	var sumGW, sumAuth, sumAuthz, sumTLS, sumCORS, sumRL, sumPG, sumTool int
+	for _, v := range views {
+		sumGW += v.ScoreBreakdown.GatewayRouting
+		sumAuth += v.ScoreBreakdown.Authentication
+		sumAuthz += v.ScoreBreakdown.Authorization
+		sumTLS += v.ScoreBreakdown.TLS
+		sumCORS += v.ScoreBreakdown.CORS
+		sumRL += v.ScoreBreakdown.RateLimit
+		sumPG += v.ScoreBreakdown.PromptGuard
+		sumTool += v.ScoreBreakdown.ToolScope
+	}
+
+	bd := ScoreBreakdown{
+		AgentGatewayScore:   sumGW / n,
+		AuthenticationScore: sumAuth / n,
+		AuthorizationScore:  sumAuthz / n,
+		TLSScore:            sumTLS / n,
+		CORSScore:           sumCORS / n,
+		RateLimitScore:      sumRL / n,
+		PromptGuardScore:    sumPG / n,
+		ToolScopeScore:      sumTool / n,
+	}
+
+	// Determine InfraAbsent: a category is "infra absent" at cluster level
+	// only if ALL servers have score 0 for that category.
+	infraAbsent := make(map[string]bool)
+	categoryChecks := []struct {
+		name     string
+		required bool
+		score    int
+	}{
+		{"Agent Gateway", policy.RequireAgentGateway, bd.AgentGatewayScore},
+		{"Authentication", policy.RequireJWTAuth, bd.AuthenticationScore},
+		{"Authorization", policy.RequireRBAC, bd.AuthorizationScore},
+		{"TLS Encryption", policy.RequireTLS, bd.TLSScore},
+		{"CORS Policy", policy.RequireCORS, bd.CORSScore},
+		{"Rate Limiting", policy.RequireRateLimit, bd.RateLimitScore},
+		{"Prompt Guard", policy.RequirePromptGuard, bd.PromptGuardScore},
+	}
+	for _, c := range categoryChecks {
+		if c.required && c.score == 0 {
+			// Check if ALL servers scored 0 (true infrastructure absence)
+			allZero := true
+			for _, v := range views {
+				var s int
+				switch c.name {
+				case "Agent Gateway":
+					s = v.ScoreBreakdown.GatewayRouting
+				case "Authentication":
+					s = v.ScoreBreakdown.Authentication
+				case "Authorization":
+					s = v.ScoreBreakdown.Authorization
+				case "TLS Encryption":
+					s = v.ScoreBreakdown.TLS
+				case "CORS Policy":
+					s = v.ScoreBreakdown.CORS
+				case "Rate Limiting":
+					s = v.ScoreBreakdown.RateLimit
+				case "Prompt Guard":
+					s = v.ScoreBreakdown.PromptGuard
+				}
+				if s > 0 {
+					allZero = false
+					break
+				}
+			}
+			if allZero {
+				infraAbsent[c.name] = true
+			}
+		}
+	}
+	if len(infraAbsent) > 0 {
+		bd.InfraAbsent = infraAbsent
+	}
+
+	return bd
 }
 
 func calculateNamespaceScores(state *ClusterState, findings []Finding, penalties SeverityPenalties) []NamespaceScore {

@@ -12,6 +12,9 @@ spec:
   requirePromptGuard: true
   requireTLS: true
   requireRateLimit: true
+  # Governance scan interval — how often the controller re-evaluates the cluster
+  # Supported values: "30s", "1m", "5m", "10m", "1h" etc. Default: "5m"
+  scanInterval: "5m"
   maxToolsWarning: 10
   maxToolsCritical: 15
   scoringWeights:

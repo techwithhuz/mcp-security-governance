@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong><span style="color:#a855f7">AI-Powered</span> Kubernetes-native governance for MCP (Model Context Protocol) infrastructure.</strong><br/>
-  Monitors <a href="https://agentgateway.dev">AgentGateway</a> and <a href="https://kagent.dev">Kagent</a> resources, evaluates security posture with a policy-driven 0–100 scoring model, provides <b>AI-powered risk analysis</b> via Google Gemini or Ollama, and surfaces findings in a real-time enterprise dashboard.
+  Monitors <a href="https://agentgateway.dev">AgentGateway</a> and <a href="https://kagent.dev">Kagent</a> resources, evaluates security posture with an <b>MCP-Server-centric scoring model</b>, provides <b>AI-powered risk analysis</b> via Google Gemini or Ollama, and surfaces findings in a real-time enterprise dashboard.
 </p>
 
 <p align="center">
@@ -25,10 +25,12 @@
 - [Overview](#-overview)
 - [Architecture](#-architecture)
 - [What It Checks](#-what-it-checks)
+- [MCP-Server-Centric Scoring](#-mcp-server-centric-scoring)
 - [Scoring Model](#-scoring-model)
 - [AI-Powered Governance Scoring](#-ai-powered-governance-scoring)
 - [Prerequisites](#-prerequisites)
 - [Quick Start — Deploy to Kind](#-quick-start--deploy-to-kind)
+- [Securing MCP Servers with AgentGateway](#-securing-mcp-servers-with-agentgateway)
 - [Deploy to an Existing Cluster](#-deploy-to-an-existing-cluster)
 - [Deploy with Helm](#-deploy-with-helm)
 - [Configuration — MCPGovernancePolicy](#%EF%B8%8F-configuration--mcpgovernancepolicy)
@@ -52,11 +54,12 @@ As AI agents powered by the **Model Context Protocol (MCP)** proliferate across 
 
 **MCP Governance** solves this by:
 
-1. **Discovering** all MCP-related resources in your cluster — AgentGateway backends, Kagent agents, RemoteMCPServers, Gateway API routes
-2. **Evaluating** them against a configurable security policy defined as a Kubernetes CRD
-3. **Scoring** your cluster's MCP security posture on a 0–100 scale across 8 governance categories
-4. **AI-Powered Analysis** — optionally runs an AI agent (Google Gemini or local Ollama) alongside the algorithmic scorer for deeper risk analysis, reasoning, and actionable suggestions
-5. **Surfacing** findings, trends, and per-resource details in a real-time dashboard with AI insights
+1. **Discovering** all MCP-related resources in your cluster — AgentGateway backends, policies, Kagent agents, MCPServers, RemoteMCPServers, Gateway API routes
+2. **Correlating** resources into an **MCP-Server-centric view** — each MCP server is scored independently based on its related gateway routes, security policies, and tool exposure
+3. **Evaluating** each MCP server against a configurable security policy defined as a Kubernetes CRD across **8 governance categories**: AgentGateway routing, authentication, authorization, CORS, TLS, prompt guard, rate limiting, and tool scope
+4. **Scoring** your cluster's MCP security posture on a 0–100 scale where the cluster score is the **weighted average of per-server scores**
+5. **AI-Powered Analysis** — optionally runs an AI agent (Google Gemini or local Ollama) alongside the algorithmic scorer for deeper risk analysis, reasoning, and actionable suggestions
+6. **Surfacing** findings, tool exposure metrics, and per-server security details in a real-time dashboard with interactive score explanations
 
 ---
 
@@ -135,10 +138,11 @@ graph TB
 
 1. The **controller** discovers all MCP-related resources via the Kubernetes API every 30 seconds
 2. It reads the **MCPGovernancePolicy** CRD to determine what to enforce
-3. The **evaluator** scores the cluster and generates findings per category
-4. If enabled, the **AI agent** sends cluster state to an LLM (Gemini or Ollama) for deeper risk analysis, reasoning, and suggestions
-5. Results are exposed via a REST API and written back to a **GovernanceEvaluation** CRD
-6. The **dashboard** polls the API every 15 seconds and renders real-time visualizations including AI insights
+3. The **MCP server correlation engine** builds per-server views — associating each MCPServer/RemoteMCPServer with its gateway routes, backends, security policies, and tool restrictions
+4. The **evaluator** scores each MCP server independently across 8 categories, then aggregates into a cluster-level score (weighted average of per-server averages)
+5. If enabled, the **AI agent** sends cluster state to an LLM (Gemini or Ollama) for deeper risk analysis, reasoning, and suggestions
+6. Results are exposed via a REST API and written back to a **GovernanceEvaluation** CRD
+7. The **dashboard** polls the API every 15 seconds and renders real-time visualizations including per-server drill-down, tool exposure metrics, and interactive score explanations
 
 ---
 
@@ -158,24 +162,86 @@ graph TB
 
 ---
 
-## 📊 Scoring Model
+## � MCP-Server-Centric Scoring
+
+Unlike traditional cluster-wide security scanners, MCP Governance uses an **MCP-Server-centric model** — each MCP server (Kagent `MCPServer` or `RemoteMCPServer`) is individually scored based on its actual security posture.
+
+### How It Works
+
+1. **Discovery** — The controller discovers all `MCPServer` and `RemoteMCPServer` resources
+2. **Correlation** — For each MCP server, the engine finds related resources:
+   - **AgentgatewayBackend** — matched by `spec.mcp.targets[].static.host` against the server's service URL
+   - **HTTPRoute** — matched by `backendRefs` pointing to the backend
+   - **AgentgatewayPolicy** — matched by `spec.targetRefs` pointing to the HTTPRoute
+   - **Gateway** — matched via the HTTPRoute's `parentRefs`
+3. **Per-Server Scoring** — Each server is scored independently across 8 categories (0–100 each)
+4. **Cluster Aggregation** — The cluster-level category score is the **average** across all MCP servers
+5. **Finding Association** — Findings are attributed to specific MCP servers, not just cluster-wide
+
+### Per-Server Security Controls
+
+Each MCP server is evaluated for:
+
+| Control | Source | What's Checked |
+|---|---|---|
+| **Routed via Gateway** | AgentgatewayBackend + HTTPRoute | MCP traffic goes through AgentGateway proxy |
+| **JWT Authentication** | AgentgatewayPolicy `traffic.jwtAuthentication` | Strict JWT auth with issuer + JWKS |
+| **Authorization (RBAC)** | AgentgatewayPolicy `traffic.authorization` | CEL-based tool access control |
+| **TLS Encryption** | AgentgatewayBackend `policies.tls` | Backend TLS with SNI verification |
+| **CORS Policy** | AgentgatewayPolicy `traffic.cors` | Cross-origin protection configured |
+| **Rate Limiting** | AgentgatewayPolicy `traffic.rateLimit` | Request rate limits enforced |
+| **Prompt Guard** | AgentgatewayPolicy `backend.ai.promptGuard` | Prompt injection protection + sensitive data masking |
+| **Tool Scope** | AgentgatewayPolicy `traffic.authorization.policy` | Tool count restricted via CEL expressions |
+
+### Tool Exposure Tracking
+
+The dashboard tracks **tools exposed vs total tools** for each MCP server:
+
+- **Total Tools** — All tools discovered on the MCP server
+- **Exposed Tools** — Tools accessible after CEL authorization restrictions
+- Example: A server with 57 tools but a CEL policy allowing only 10 → shows `10/57 tools`
+
+### Cluster Score Formula
+
+```
+Per-Server Category Score = 100 if control present, 0 if missing
+Cluster Category Score    = Σ per_server_scores / number_of_servers
+Cluster Overall Score     = Σ (cluster_category_score × weight) / Σ weights
+```
+
+### Example
+
+With 2 MCP servers — one fully secured (score 100) and one with no policies (score 0):
+
+```
+Authentication: (100 + 0) ÷ 2 = 50
+Authorization:  (100 + 0) ÷ 2 = 50
+TLS:            (100 + 0) ÷ 2 = 50
+...
+Overall Score: 50/100 = Grade C
+```
+
+---
+
+## �📊 Scoring Model
 
 | Aspect | Details |
 |---|---|
-| **Scale** | 0–100 weighted score |
+| **Scale** | 0–100 per MCP server, cluster score = weighted average of per-server averages |
 | **Grade** | **A** (90+) · **B** (70–89) · **C** (50–69) · **D** (30–49) · **F** (<30) |
 | **Phase** | `Compliant` · `Warning` · `NonCompliant` · `Critical` |
-| **Category weights** | Configurable — default: AgentGateway 25, Auth 20, AuthZ 15, CORS 10, TLS 10, PromptGuard 10, RateLimit 5, ToolScope 5 |
-| **Severity penalties** | Configurable — default: Critical −40pts, High −25pts, Medium −15pts, Low −5pts |
-| **Infrastructure absence** | If no MCP infrastructure exists for a required category → score = 0 (not a false 100) |
+| **Categories** | 8 governance categories, each scored per MCP server |
+| **Category weights** | Configurable — default: AgentGateway 25, Auth 20, AuthZ 15, Tool Scope 10, CORS 10, TLS 10, PromptGuard 5, RateLimit 5 |
+| **Infrastructure absence** | If a required control is missing for a server → that server scores 0 for that category |
 
 ### How scoring works
 
-Each category starts at 100. For every finding in that category, the corresponding severity penalty is subtracted (minimum 0). The final cluster score is a weighted average of all enabled category scores.
+Each MCP server is scored independently across 8 categories. A category scores 100 if the security control is present, 0 if missing. The cluster-level category score is the average across all MCP servers. The final cluster score is a weighted average of all enabled category scores.
 
 ```
-Category Score = max(0, 100 - Σ severity_penalty(finding))
-Cluster Score  = Σ (category_score × weight) / Σ weights
+Server Category Score  = 100 (control present) or 0 (control missing)
+Cluster Category Score = Σ server_category_scores / num_servers
+Cluster Score          = Σ (cluster_category_score × weight) / Σ weights
 ```
 
 ---
@@ -386,6 +452,127 @@ mcpgovernancepolicies.governance.mcp.io
 |---|---|
 | Dashboard | http://localhost:3000 |
 | API (via port-forward) | `kubectl port-forward -n mcp-governance svc/mcp-governance-controller 8090:8090` → http://localhost:8090 |
+
+---
+
+## 🔒 Securing MCP Servers with AgentGateway
+
+Once MCP Governance discovers your MCP servers, the next step is to **secure them** by routing traffic through [AgentGateway](https://agentgateway.dev) with a full security policy stack.
+
+The `deploy/samples/` directory includes production-ready security configurations for MCP servers:
+
+| File | Description |
+|---|---|
+| `kagent-tool-server-gateway.yaml` | Full security stack for `kagent-tool-server` (113 tools → 10 exposed) |
+| `kagent-grafana-mcp-gateway.yaml` | Full security stack for `kagent-grafana-mcp` (57 tools → 10 exposed) |
+
+### What Gets Deployed Per MCP Server
+
+Each security configuration creates 3 resources:
+
+#### 1. AgentgatewayBackend — Backend routing with TLS
+
+```yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: kagent-tool-server-backend
+spec:
+  mcp:
+    targets:
+      - name: kagent-tool-server
+        static:
+          host: kagent-tools.kagent.svc.cluster.local
+          port: 8084
+          path: /mcp
+          protocol: StreamableHTTP
+  policies:
+    tls:
+      sni: kagent-tools.kagent.svc.cluster.local
+```
+
+#### 2. HTTPRoute — Gateway API routing
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kagent-tool-server-route
+spec:
+  parentRefs:
+    - name: kagent-mcp-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp/tools
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: kagent-tool-server-backend
+```
+
+#### 3. AgentgatewayPolicy — Full security stack
+
+```yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: kagent-tool-server-access-policy
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: kagent-tool-server-route
+  traffic:
+    jwtAuthentication:          # JWT with Strict mode
+      mode: Strict
+      providers:
+        - issuer: https://auth.mcp-governance.io
+          audiences: [mcp-agents, kagent-tools]
+          jwks: { inline: '...' }
+    cors:                        # CORS protection
+      allowOrigins: ["https://dashboard.mcp-governance.io"]
+      allowMethods: [GET, POST, OPTIONS]
+      allowHeaders: [Authorization, Content-Type, X-MCP-Session-Id]
+    rateLimit:                   # Rate limiting
+      local:
+        - unit: Minutes
+          requests: 100
+          burst: 20
+    authorization:               # CEL-based tool access control
+      action: Allow
+      policy:
+        matchExpressions:
+          - "mcp.tool.name in ['k8s_get_resources', 'k8s_describe_resource', ...]"
+  backend:
+    ai:
+      promptGuard:               # Prompt injection protection
+        request:
+          - regex:
+              action: Reject
+              matches: ["ignore previous instructions", "jailbreak"]
+              builtins: [CreditCard, Ssn]
+        response:
+          - regex:
+              action: Mask
+              builtins: [CreditCard, Ssn, Email]
+```
+
+### Apply Security Policies
+
+```bash
+# Secure kagent-tool-server
+kubectl apply -f deploy/samples/kagent-tool-server-gateway.yaml
+
+# Secure kagent-grafana-mcp
+kubectl apply -f deploy/samples/kagent-grafana-mcp-gateway.yaml
+
+# Trigger a governance scan to see the updated scores
+# (or wait for the next automatic scan cycle)
+```
+
+After applying, the dashboard will show each MCP server going from **Score 0/F** to **Score 100/A** with all 8 security controls passing.
 
 ---
 
@@ -690,24 +877,51 @@ spec:
 
 ## 🖥️ Dashboard
 
-The dashboard provides a real-time view of your MCP security posture with auto-refresh every 15 seconds.
+The dashboard provides a real-time MCP-Server-centric view of your cluster's security posture with auto-refresh every 15 seconds.
+
+### Overview Tab
 
 | Component | Description |
 |---|---|
-| **Score Gauge** | Animated 0–100 dial with grade (A–F) and compliance phase |
+| **Cluster Governance Score** | Animated 0–100 gauge with grade (A–F) and compliance phase |
+| **MCP Servers** | Total MCP server count with routed/unrouted breakdown |
+| **MCP Servers At Risk** | Servers scoring below 70 with critical count |
+| **Total Findings** | Aggregate finding count across all servers with severity breakdown (clickable → All Findings tab) |
+| **Tools Exposed** | Tools exposed after policy restrictions vs total tools discovered (e.g., `20/170`) |
+| **Category Breakdown** | Horizontal bar + radar chart showing per-category cluster scores |
+| **MCP Servers Quick View** | Card grid of all MCP servers with score, grade, security badges, and click-through to detail |
+| **Score Explainer** | "How is the Score Calculated?" — per-category breakdown with click-through to per-server averaging modal |
 | **AI Score Card** | AI-powered governance analysis with score comparison, risk breakdown, suggestions, and refresh/pause controls |
-| **Resource Cards** | At-a-glance counts — Agents, RemoteMCPServers, Gateways, MCP Endpoints, Findings |
-| **Category Breakdown** | Horizontal bar chart showing per-category scores and weights |
-| **Score Explainer** | Human-readable explanation of how the score was calculated |
-| **Findings Table** | Filterable list of all findings with severity, category, resource, and remediation |
-| **Resource Inventory** | Per-resource detail view with individual scores and finding counts |
 | **Trend Chart** | Historical score and finding count over time |
+
+### MCP Servers Tab
+
+| Component | Description |
+|---|---|
+| **Server List** | All discovered MCPServer/RemoteMCPServer resources with score, grade, security badges, tool exposure (`exposed/total tools`), and transport protocol |
+| **Server Detail** | Per-server drill-down showing: 8 security control cards (pass/fail), score breakdown with per-category explanations, related resources (Backend, HTTPRoute, Policy, Gateway) with detail pop-ups, findings attributed to this server |
+| **Score Explanation Modal** | Per-category detail showing what controls are present, source resources, and specific reasons |
+| **Resource Detail Modal** | Click any related resource to see its full configuration as key-value cards |
+
+### All Findings Tab
+
+| Component | Description |
+|---|---|
+| **Findings Table** | Filterable list of all findings aggregated across MCP servers, with severity and category filters |
+| **Per-Finding Detail** | Expandable rows showing description, impact, remediation steps, namespace, and which MCP server the finding belongs to |
+
+### Resource Inventory Tab
+
+| Component | Description |
+|---|---|
+| **Resource Table** | Every discovered Kubernetes resource with kind, namespace, status, and individual governance score |
 
 ### Dashboard Tabs
 
-- **Overview** — Score gauge, AI score card, resource cards, breakdown chart, trend chart, score explainer
-- **Resources** — Full resource inventory with per-resource drill-down
-- **Findings** — Complete findings table with severity filtering
+- **Overview** — Cluster governance score, MCP server summary tiles, tool exposure, category breakdown, score explainer, AI insights, trends
+- **MCP Servers** — Per-server list with drill-down to security controls, score explanations, related resources
+- **Resource Inventory** — Full resource inventory with per-resource scores
+- **All Findings** — Complete findings table aggregated across all MCP servers
 
 ---
 
@@ -718,8 +932,9 @@ All endpoints are served by the controller on port **8090** with CORS enabled.
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/health` | Health check — returns `{"status": "healthy", "version": "..."}` |
-| `GET` | `/api/governance/score` | Overall score, grade, phase, per-category breakdown, explanation |
+| `GET` | `/api/governance/score` | Overall score, grade, phase, per-category breakdown with per-server contributions |
 | `GET` | `/api/governance/findings` | All findings with total count and severity breakdown |
+| `GET` | `/api/governance/mcp-servers` | MCP-Server-centric view — per-server scores, security controls, tool exposure, findings, related resources, and cluster summary |
 | `GET` | `/api/governance/resources` | Resource inventory summary (counts by kind) |
 | `GET` | `/api/governance/resources/detail` | Per-resource scores, findings, and severity |
 | `GET` | `/api/governance/namespaces` | Per-namespace scores and finding counts |
@@ -729,24 +944,96 @@ All endpoints are served by the controller on port **8090** with CORS enabled.
 | `GET` | `/api/governance/ai-score` | AI agent score, reasoning, risks, suggestions, comparison, and scan config |
 | `POST` | `/api/governance/ai-score/refresh` | Trigger an immediate AI evaluation (bypasses rate-limit and pause) |
 | `POST` | `/api/governance/ai-score/toggle` | Toggle periodic AI scanning on/off at runtime |
+| `POST` | `/api/governance/scan` | Trigger an on-demand governance scan |
 
 ### Example responses
 
-**Score:**
+**Score (with per-server contributions):**
 ```bash
 curl -s http://localhost:8090/api/governance/score | jq .
 ```
 ```json
 {
-  "score": 2,
-  "grade": "F",
-  "phase": "Critical",
+  "score": 100,
+  "grade": "A",
+  "phase": "Compliant",
   "categories": [
-    { "category": "AgentGateway Compliance", "score": 0, "weight": 25, "weighted": 0, "status": "critical" },
-    { "category": "Authentication", "score": 0, "weight": 20, "weighted": 0, "status": "critical" },
-    { "category": "Tool Scope", "score": 20, "weight": 10, "weighted": 2, "status": "critical" }
+    {
+      "category": "AgentGateway Compliance",
+      "score": 100,
+      "weight": 25,
+      "weighted": 25,
+      "status": "passing",
+      "servers": [
+        { "name": "kagent-grafana-mcp", "score": 100, "grade": "A" },
+        { "name": "kagent-tool-server", "score": 100, "grade": "A" }
+      ]
+    },
+    {
+      "category": "Authentication",
+      "score": 100,
+      "weight": 20,
+      "weighted": 20,
+      "status": "passing",
+      "servers": [
+        { "name": "kagent-grafana-mcp", "score": 100, "grade": "A" },
+        { "name": "kagent-tool-server", "score": 100, "grade": "A" }
+      ]
+    }
   ],
-  "explanation": "Score is a weighted average of 8 governance categories..."
+  "explanation": "Score is a weighted average of 8 governance categories. Each category score is the average across 2 MCP server(s). The final score 100/100 = Grade A."
+}
+```
+
+**MCP Servers:**
+```bash
+curl -s http://localhost:8090/api/governance/mcp-servers | jq .
+```
+```json
+{
+  "servers": [
+    {
+      "id": "kagent-tool-server",
+      "name": "kagent-tool-server",
+      "namespace": "kagent",
+      "source": "RemoteMCPServer",
+      "score": 100,
+      "grade": "A",
+      "routedThroughGateway": true,
+      "hasJWT": true,
+      "hasTLS": true,
+      "hasCORS": true,
+      "hasRateLimit": true,
+      "hasPromptGuard": true,
+      "toolCount": 113,
+      "effectiveToolCount": 10,
+      "toolNames": ["k8s_get_resources", "k8s_describe_resource", "..."],
+      "findings": [
+        {
+          "id": "CORS-002",
+          "severity": "Low",
+          "title": "CSRF protection not configured alongside CORS"
+        }
+      ],
+      "relatedResources": [
+        { "kind": "AgentgatewayBackend", "name": "kagent-tool-server-backend" },
+        { "kind": "HTTPRoute", "name": "kagent-tool-server-route" },
+        { "kind": "AgentgatewayPolicy", "name": "kagent-tool-server-access-policy" },
+        { "kind": "Gateway", "name": "kagent-mcp-gateway" }
+      ]
+    }
+  ],
+  "summary": {
+    "totalMCPServers": 2,
+    "routedServers": 2,
+    "unroutedServers": 0,
+    "securedServers": 2,
+    "atRiskServers": 0,
+    "criticalServers": 0,
+    "totalTools": 170,
+    "exposedTools": 20,
+    "averageScore": 100
+  }
 }
 ```
 
@@ -756,14 +1043,15 @@ curl -s http://localhost:8090/api/governance/findings | jq '.findings[0]'
 ```
 ```json
 {
-  "id": "agw-001",
-  "severity": "Critical",
-  "category": "AgentGateway",
-  "title": "No AgentGateway infrastructure detected",
-  "description": "No AgentGateway backends found in the cluster...",
-  "impact": "MCP traffic is not proxied through a secure gateway",
-  "remediation": "Deploy agentgateway.dev and configure backends for MCP servers",
-  "namespace": "cluster-wide"
+  "id": "CORS-002",
+  "severity": "Low",
+  "category": "CORS",
+  "title": "CSRF protection not configured alongside CORS",
+  "description": "CORS is enabled but no CSRF token validation is configured...",
+  "impact": "Cross-site request forgery attacks may be possible against MCP endpoints",
+  "remediation": "Add CSRF token validation to complement CORS configuration",
+  "namespace": "mcp-governance",
+  "resourceRef": "AgentgatewayPolicy/kagent-tool-server-access-policy"
 }
 ```
 
@@ -780,30 +1068,30 @@ curl -s http://localhost:8090/api/governance/ai-score | jq .
     "scanPaused": false
   },
   "aiScore": {
-    "score": 5,
-    "grade": "F",
-    "reasoning": "The cluster has critical security gaps across all governance categories...",
+    "score": 95,
+    "grade": "A",
+    "reasoning": "The cluster has a strong security posture with full AgentGateway coverage...",
     "risks": [
       {
-        "category": "Gateway Security",
-        "severity": "Critical",
-        "description": "No AgentGateway infrastructure detected",
-        "impact": "All MCP traffic is unmonitored and unprotected"
+        "category": "CORS Security",
+        "severity": "Low",
+        "description": "CSRF protection not configured alongside CORS",
+        "impact": "Potential cross-site request forgery on MCP endpoints"
       }
     ],
     "suggestions": [
-      "Deploy AgentGateway and route all MCP traffic through it",
-      "Enable JWT authentication on all gateway listeners",
-      "Configure TLS termination for encrypted connections"
+      "Add CSRF token validation to complement CORS policies",
+      "Consider adding mTLS for service-to-service authentication",
+      "Implement audit logging for all MCP tool invocations"
     ],
     "timestamp": "2026-02-13T10:30:00Z"
   },
   "comparison": {
-    "algorithmicScore": 2,
-    "algorithmicGrade": "F",
-    "aiScore": 5,
-    "aiGrade": "F",
-    "scoreDifference": 3
+    "algorithmicScore": 100,
+    "algorithmicGrade": "A",
+    "aiScore": 95,
+    "aiGrade": "A",
+    "scoreDifference": 5
   }
 }
 ```
@@ -903,6 +1191,7 @@ go tool cover -html=coverage.out    # Open HTML report in browser
 | Package | Test File | Tests | What's Covered |
 |---|---|---|---|
 | `pkg/evaluator` | `evaluator_test.go` | 85+ | All 9 governance checks (AgentGateway, Authentication, Authorization, CORS, TLS, PromptGuard, RateLimit, ToolCount, Exposure), scoring engine, severity penalties, weighted averages, infrastructure absence detection, namespace-level scores, custom penalties & weights, edge cases |
+| `pkg/evaluator` | `mcpserver.go` | — | MCP-server-centric correlation engine: `BuildMCPServerViews()`, `correlateMCPServer()`, `scoreMCPServer()`, `BuildMCPServerSummary()`, `ComputeSuppressedFindingIDs()`, `FilterFindings()` |
 | `pkg/discovery` | `discovery_test.go` | 17 | `getNestedMap`, `getNestedString`, `getNestedInt`, `getNestedSlice` — all nested object traversal helpers with multi-level, missing key, wrong type, and empty cases |
 | `cmd/api` | `main_test.go` | 30+ | All HTTP handlers (health, score, findings, resources, namespaces, breakdown, evaluation, resource detail, trends), `getGrade`/`getPhase`/`statusLabel` helpers, `buildResourceDetail` score calculation, `recordTrendPoint` with 100-point cap, CORS middleware preflight, JSON response helper |
 
@@ -937,6 +1226,7 @@ mcp-security-governance/
 │   │   │   └── discovery_test.go        # Discovery helper tests
 │   │   └── evaluator/
 │   │       ├── evaluator.go             # Scoring engine — 8 categories, configurable penalties
+│   │       ├── mcpserver.go             # MCP-server-centric correlation, scoring & findings
 │   │       └── evaluator_test.go        # Evaluator tests (85+ test cases)
 │   ├── Dockerfile                        # Multi-stage Go build (alpine)
 │   ├── go.mod
@@ -946,16 +1236,21 @@ mcp-security-governance/
 │   ├── src/
 │   │   ├── app/
 │   │   │   ├── layout.tsx               # Root layout + favicon
-│   │   │   ├── page.tsx                 # Main dashboard (3 tabs: overview, resources, findings)
+│   │   │   ├── page.tsx                 # Main dashboard (4 tabs: overview, mcp-servers, resources, findings)
 │   │   │   └── globals.css              # Tailwind CSS + custom governance theme
 │   │   ├── components/
 │   │   │   ├── AIScoreCard.tsx          # AI governance score with risks, suggestions, refresh/pause
-│   │   │   ├── ScoreGauge.tsx           # Animated score dial with grade
+│   │   │   ├── ScoreGauge.tsx           # Animated score dial with grade + cluster title
 │   │   │   ├── BreakdownChart.tsx       # Category breakdown bar chart
-│   │   │   ├── FindingsTable.tsx        # Filterable findings table
+│   │   │   ├── CategoryScoreModal.tsx   # Per-category score explanation with per-server averages
+│   │   │   ├── FindingsTable.tsx        # Filterable findings table (aggregated per MCP server)
+│   │   │   ├── MCPServerList.tsx        # MCP server cards with score, tools exposed/total
+│   │   │   ├── MCPServerDetail.tsx      # Per-server detail: security controls, findings, resources
 │   │   │   ├── ResourceCards.tsx        # Summary stat cards
-│   │   │   ├── ResourceInventory.tsx    # Per-resource detail table
+│   │   │   ├── ResourceInventory.tsx    # Per-resource detail table with related resources
+│   │   │   ├── ResourceDetailModal.tsx  # Resource detail pop-up modal
 │   │   │   ├── ScoreExplainer.tsx       # Score explanation panel
+│   │   │   ├── ScoreExplanationModal.tsx # Per-server score explanation modal
 │   │   │   └── TrendChart.tsx           # Historical trend line chart
 │   │   └── lib/
 │   │       ├── api.ts                   # API client utilities
@@ -976,7 +1271,9 @@ mcp-security-governance/
 │   │   └── deployment.yaml             # Full deployment: ServiceAccount, RBAC, Deployments, Services
 │   └── samples/
 │       ├── governance-policy.yaml       # Sample MCPGovernancePolicy + GovernanceEvaluation
-│       └── demo-resources.yaml          # Demo AgentGateway/Kagent resources
+│       ├── demo-resources.yaml          # Demo AgentGateway/Kagent resources
+│       ├── kagent-tool-server-gateway.yaml    # Full security stack for kagent-tool-server
+│       └── kagent-grafana-mcp-gateway.yaml    # Full security stack for kagent-grafana-mcp
 │
 ├── charts/                                # Helm chart
 │   └── mcp-governance/
@@ -1020,7 +1317,7 @@ kubectl get mgp
 
 # Example output:
 # NAME                    SCORE   PHASE      LAST EVALUATED               AGE
-# enterprise-mcp-policy   2       Critical   2026-02-11T03:19:27Z         2d
+# enterprise-mcp-policy   100     Compliant  2026-02-13T10:30:00Z         2d
 
 # Describe for full details
 kubectl describe mgp enterprise-mcp-policy
@@ -1067,15 +1364,15 @@ spec:
 
 # Status is automatically populated by the controller:
 status:
-  clusterScore: 2
-  phase: Critical
-  lastEvaluationTime: "2026-02-11T03:19:27Z"
+  clusterScore: 100
+  phase: Compliant
+  lastEvaluationTime: "2026-02-13T10:30:00Z"
   conditions:
     - type: Evaluated
       status: "True"
       reason: EvaluationComplete
-      message: "Cluster governance score: 2/100 (Critical). 12 finding(s) detected."
-      lastTransitionTime: "2026-02-11T03:19:27Z"
+      message: "Cluster governance score: 100/100 (Compliant). 2 finding(s) detected across 2 MCP servers."
+      lastTransitionTime: "2026-02-13T10:30:00Z"
 ```
 
 #### Status Fields
@@ -1109,8 +1406,8 @@ When you run `kubectl get mgp`, these columns are displayed:
 kubectl get ge
 
 # Example output:
-# NAME                    SCORE   SCOPE     PHASE      AGE
-# enterprise-evaluation   2       cluster   Critical   2d
+# NAME                    SCORE   SCOPE     PHASE       AGE
+# enterprise-evaluation   100     cluster   Compliant   2d
 
 # Show detailed findings count (priority 1 column)
 kubectl get ge -o wide
@@ -1133,48 +1430,48 @@ spec:
 
 # Status is automatically populated by the controller:
 status:
-  score: 2
-  phase: Critical
-  findingsCount: 12
-  lastEvaluationTime: "2026-02-11T03:19:27Z"
+  score: 100
+  phase: Compliant
+  findingsCount: 2
+  lastEvaluationTime: "2026-02-13T10:30:00Z"
   findings:
-    - id: "AGW-001"
-      severity: Critical
-      category: AgentGateway
-      title: "No agentgateway Gateway detected"
-      description: "No Gateway resource with gatewayClassName 'agentgateway' was found..."
-      impact: "MCP servers and agents have no centralized security enforcement point."
-      remediation: "Deploy an agentgateway Gateway..."
-      resourceRef: ""
-      namespace: ""
-      timestamp: "2026-02-11T03:19:27Z"
+    - id: "CORS-002"
+      severity: Low
+      category: CORS
+      title: "CSRF protection not configured alongside CORS"
+      description: "CORS is enabled but no CSRF token validation is configured..."
+      impact: "Cross-site request forgery attacks may be possible against MCP endpoints"
+      remediation: "Add CSRF token validation to complement CORS configuration"
+      resourceRef: "AgentgatewayPolicy/kagent-tool-server-access-policy"
+      namespace: "mcp-governance"
+      timestamp: "2026-02-13T10:30:00Z"
   scoreBreakdown:
-    agentGatewayScore: 0
-    authenticationScore: 0
-    authorizationScore: 0
-    corsScore: 0
-    tlsScore: 0
-    promptGuardScore: 0
-    rateLimitScore: 0
+    agentGatewayScore: 100
+    authenticationScore: 100
+    authorizationScore: 100
+    corsScore: 100
+    tlsScore: 100
+    promptGuardScore: 100
+    rateLimitScore: 100
   resourceSummary:
-    gatewaysFound: 0
-    agentgatewayBackends: 0
-    agentgatewayPolicies: 0
-    httpRoutes: 0
+    gatewaysFound: 1
+    agentgatewayBackends: 2
+    agentgatewayPolicies: 2
+    httpRoutes: 2
     kagentAgents: 10
     kagentMCPServers: 0
     kagentRemoteMCPServers: 2
-    compliantResources: 0
-    nonCompliantResources: 12
+    compliantResources: 17
+    nonCompliantResources: 0
     totalMCPEndpoints: 2
     exposedMCPEndpoints: 0
   namespaceScores:
     - namespace: kagent
-      score: 0
-      findings: 4
-    - namespace: default
       score: 100
       findings: 0
+    - namespace: mcp-governance
+      score: 100
+      findings: 2
 ```
 
 #### Status Fields
@@ -1350,7 +1647,7 @@ kubectl port-forward -n mcp-governance svc/mcp-governance-controller 8090:8090
 
 ### Score shows 0 / all categories Critical
 
-This is **expected** when no MCP infrastructure (AgentGateway, Kagent) is deployed. The controller scores based on what it discovers. Deploy real or demo resources:
+This is **expected** when no MCP infrastructure (AgentGateway, Kagent) is deployed. The controller scores each MCP server individually based on its security controls (gateway routing, JWT, TLS, CORS, rate limiting, prompt guard, authorization) and then averages across all servers. Deploy real or demo resources:
 
 ```bash
 make deploy-samples
