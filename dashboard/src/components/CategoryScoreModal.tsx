@@ -16,6 +16,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   TrendingDown,
+  Server,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -32,6 +33,12 @@ interface Finding {
   remediation: string;
 }
 
+interface ServerContribution {
+  name: string;
+  score: number;
+  grade: string;
+}
+
 interface ScoreCategory {
   category: string;
   score: number;
@@ -39,6 +46,7 @@ interface ScoreCategory {
   weighted: number;
   status: string;
   infraAbsent?: boolean;
+  servers?: ServerContribution[];
 }
 
 interface SeverityPenalties {
@@ -69,6 +77,13 @@ const statusConfig: Record<string, { color: string; label: string }> = {
   critical: { color: '#ef4444', label: 'Critical' },
 };
 
+function scoreColor(score: number): string {
+  if (score >= 90) return '#22c55e';
+  if (score >= 70) return '#eab308';
+  if (score >= 50) return '#f97316';
+  return '#ef4444';
+}
+
 export default function CategoryScoreModal({ category, findings, severityPenalties, onClose }: CategoryScoreModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [expandedFinding, setExpandedFinding] = useState<string | null>(null);
@@ -87,6 +102,9 @@ export default function CategoryScoreModal({ category, findings, severityPenalti
     if (e.target === overlayRef.current) onClose();
   };
 
+  const servers = category.servers || [];
+  const hasServers = servers.length > 0;
+
   // Count findings by severity
   const severityCounts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
   findings.forEach(f => {
@@ -94,22 +112,6 @@ export default function CategoryScoreModal({ category, findings, severityPenalti
       severityCounts[f.severity as keyof typeof severityCounts]++;
     }
   });
-
-  // Calculate the penalty breakdown
-  const penaltyBreakdown = Object.entries(severityCounts)
-    .filter(([, count]) => count > 0)
-    .map(([severity, count]) => ({
-      severity,
-      count,
-      penaltyEach: severityPenalties[severity as keyof SeverityPenalties],
-      totalPenalty: count * severityPenalties[severity as keyof SeverityPenalties],
-    }));
-
-  const totalPenalty = penaltyBreakdown.reduce((sum, p) => sum + p.totalPenalty, 0);
-  // Use the API-provided flag instead of guessing from score === 0.
-  // infraAbsent is true only when the score is 0 due to missing infrastructure,
-  // not when it's 0 due to penalty overflow (e.g. 3 × Critical = 120 > 100).
-  const hasInfraAbsence = category.infraAbsent === true;
 
   const config = statusConfig[category.status] || statusConfig.critical;
 
@@ -158,78 +160,55 @@ export default function CategoryScoreModal({ category, findings, severityPenalti
 
         {/* Scrollable content */}
         <div className="overflow-y-auto p-6 space-y-6">
-          {/* Score Calculation Breakdown */}
+          {/* Score Calculation Breakdown — MCP Server Average */}
           <div className="bg-gov-bg rounded-xl border border-gov-border p-5">
             <div className="flex items-center gap-2 mb-4">
-              <TrendingDown size={16} className="text-blue-400" />
+              <Server size={16} className="text-blue-400" />
               <h3 className="text-sm font-bold uppercase tracking-wider text-gov-text-2">Score Calculation</h3>
             </div>
 
-            {findings.length === 0 ? (
-              <div className="flex items-center gap-3 p-4 rounded-xl bg-green-500/10 border border-green-500/30">
-                <ShieldCheck size={24} className="text-green-400" />
-                <div>
-                  <p className="text-sm font-semibold text-green-400">Fully Compliant</p>
-                  <p className="text-xs text-gov-text-3 mt-0.5">No findings detected. This category starts at 100 and has no deductions.</p>
-                </div>
-              </div>
-            ) : (
+            {hasServers ? (
               <div className="space-y-3">
-                {/* Start score */}
-                <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-gov-surface">
-                  <span className="text-sm text-gov-text-2">Starting Score</span>
-                  <span className="text-sm font-bold text-green-400">100</span>
-                </div>
+                {/* Explanation */}
+                <p className="text-xs text-gov-text-3 leading-relaxed">
+                  The cluster-level score for <span className="font-semibold text-gov-text-2">{category.category}</span> is the average score across all {servers.length} MCP server{servers.length !== 1 ? 's' : ''}.
+                </p>
 
-                {/* Penalty breakdown */}
-                {hasInfraAbsence ? (
-                  <div className="flex items-center gap-3 p-4 rounded-xl bg-red-500/10 border border-red-500/30">
-                    <ShieldAlert size={24} className="text-red-400" />
-                    <div>
-                      <p className="text-sm font-semibold text-red-400">Infrastructure Absent → Score = 0</p>
-                      <p className="text-xs text-gov-text-3 mt-0.5">
-                        Required infrastructure is completely missing. When core infrastructure is absent,
-                        the category score is set directly to 0 (not calculated via penalties).
-                      </p>
+                {/* Per-server scores */}
+                {servers.map((srv) => {
+                  const sColor = scoreColor(srv.score);
+                  return (
+                    <div key={srv.name} className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-gov-surface border border-gov-border/50">
+                      <div className="flex items-center gap-2">
+                        <Server size={14} className="text-gov-text-3" />
+                        <span className="text-sm font-medium text-gov-text">{srv.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold tabular-nums" style={{ color: sColor }}>
+                          {srv.score}
+                        </span>
+                        <span className="text-xs text-gov-text-3">/100</span>
+                        <span
+                          className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold"
+                          style={{ backgroundColor: `${sColor}15`, color: sColor }}
+                        >
+                          {srv.grade}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <>
-                    {penaltyBreakdown.map(pb => {
-                      const sevConfig = severityConfig[pb.severity];
-                      const SevIcon = sevConfig.icon;
-                      return (
-                        <div key={pb.severity} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gov-surface">
-                          <div className="flex items-center gap-2">
-                            <SevIcon size={14} style={{ color: sevConfig.color }} />
-                            <span className="text-sm text-gov-text-2">
-                              {pb.count} × {pb.severity} finding{pb.count > 1 ? 's' : ''}
-                            </span>
-                            <span className="text-xs text-gov-text-3">
-                              (−{pb.penaltyEach}pts each)
-                            </span>
-                          </div>
-                          <span className="text-sm font-bold text-red-400">
-                            −{pb.totalPenalty}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
+                  );
+                })}
 
                 {/* Divider */}
                 <div className="border-t border-gov-border" />
 
-                {/* Final score */}
+                {/* Average calculation */}
                 <div className="flex items-center justify-between px-3 py-3 rounded-lg bg-gov-surface border border-gov-border">
-                  <span className="text-sm font-bold text-gov-text">Final Category Score</span>
+                  <span className="text-sm font-bold text-gov-text">Cluster Average</span>
                   <div className="flex items-center gap-2">
-                    {!hasInfraAbsence && (
-                      <span className="text-xs text-gov-text-3">
-                        100 − {totalPenalty} = 
-                      </span>
-                    )}
+                    <span className="text-xs text-gov-text-3">
+                      ({servers.map(s => s.score).join(' + ')}) ÷ {servers.length} =
+                    </span>
                     <span
                       className="text-lg font-black tabular-nums"
                       style={{ color: config.color }}
@@ -255,6 +234,15 @@ export default function CategoryScoreModal({ category, findings, severityPenalti
                   </div>
                 </div>
               </div>
+            ) : (
+              /* Fallback if no server data available */
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-gov-surface border border-gov-border">
+                <Info size={24} className="text-gov-text-3" />
+                <div>
+                  <p className="text-sm font-semibold text-gov-text-2">No MCP Servers Found</p>
+                  <p className="text-xs text-gov-text-3 mt-0.5">No MCP servers discovered for scoring.</p>
+                </div>
+              </div>
             )}
           </div>
 
@@ -265,7 +253,7 @@ export default function CategoryScoreModal({ category, findings, severityPenalti
                 <div className="flex items-center gap-2">
                   <AlertTriangle size={16} className="text-amber-400" />
                   <h3 className="text-sm font-bold uppercase tracking-wider text-gov-text-2">
-                    Findings ({findings.length})
+                    Related Findings ({findings.length})
                   </h3>
                 </div>
                 <div className="flex gap-2">
@@ -291,7 +279,6 @@ export default function CategoryScoreModal({ category, findings, severityPenalti
                   const sevConfig = severityConfig[finding.severity] || severityConfig.Medium;
                   const SevIcon = sevConfig.icon;
                   const isExpanded = expandedFinding === finding.id;
-                  const penalty = severityPenalties[finding.severity as keyof SeverityPenalties] || 0;
 
                   return (
                     <div
@@ -314,7 +301,12 @@ export default function CategoryScoreModal({ category, findings, severityPenalti
                           )}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-xs font-bold text-red-400">−{penalty}pts</span>
+                          <span
+                            className="text-xs font-semibold px-1.5 py-0.5 rounded"
+                            style={{ backgroundColor: `${sevConfig.color}15`, color: sevConfig.color }}
+                          >
+                            {finding.severity}
+                          </span>
                           {isExpanded ? <ChevronDown size={14} className="text-gov-text-3" /> : <ChevronRight size={14} className="text-gov-text-3" />}
                         </div>
                       </button>
@@ -364,7 +356,7 @@ export default function CategoryScoreModal({ category, findings, severityPenalti
         <div className="p-4 border-t border-gov-border shrink-0 bg-gov-bg/50">
           <div className="flex items-center justify-between">
             <p className="text-xs text-gov-text-3">
-              Click on each finding to see details and remediation steps
+              {findings.length > 0 ? 'Click on each finding to see details and remediation steps' : 'Click on individual MCP servers in the MCP Servers tab for detailed score explanations'}
             </p>
             <button
               onClick={onClose}

@@ -1,0 +1,138 @@
+---
+# ============================================
+# AGENTGATEWAY RESOURCES FOR kagent-tool-server
+# Routes the existing RemoteMCPServer through
+# an AgentGateway for governance compliance
+# ============================================
+
+# Gateway for kagent MCP traffic
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: kagent-mcp-gateway
+  namespace: kagent
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+
+---
+# AgentgatewayBackend pointing to the kagent-tool-server service
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: kagent-tool-server-backend
+  namespace: kagent
+spec:
+  mcp:
+    targets:
+      - name: kagent-tool-server
+        static:
+          host: kagent-tools.kagent.svc.cluster.local
+          port: 8084
+          path: /mcp
+          protocol: StreamableHTTP
+  policies:
+    tls:
+      sni: kagent-tools.kagent.svc.cluster.local
+
+---
+# HTTPRoute routing /mcp/tools traffic through the AgentgatewayBackend
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kagent-tool-server-route
+  namespace: kagent
+spec:
+  parentRefs:
+    - name: kagent-mcp-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp/tools
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: kagent-tool-server-backend
+
+---
+# AgentgatewayPolicy - Full security stack for kagent-tool-server
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: kagent-tool-server-access-policy
+  namespace: kagent
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: kagent-tool-server-route
+  traffic:
+    # JWT Authentication
+    jwtAuthentication:
+      mode: Strict
+      providers:
+        - issuer: https://auth.mcp-governance.io
+          audiences:
+            - mcp-agents
+            - kagent-tools
+          jwks:
+            inline: '{"keys":[{"kty":"RSA","use":"sig","kid":"mcp-governance-key-1","n":"0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw","e":"AQAB"}]}'
+    # CORS Policy
+    cors:
+      allowOrigins:
+        - "https://dashboard.mcp-governance.io"
+      allowMethods:
+        - GET
+        - POST
+        - OPTIONS
+      allowHeaders:
+        - Authorization
+        - Content-Type
+        - X-MCP-Session-Id
+      exposeHeaders:
+        - X-MCP-Request-Id
+      maxAge: 3600
+      allowCredentials: true
+    # CSRF Protection
+    csrf:
+      additionalOrigins:
+        - "https://dashboard.mcp-governance.io"
+    # Rate Limiting (local)
+    rateLimit:
+      local:
+        - unit: Minutes
+          requests: 100
+          burst: 20
+    # Authorization - Allow only 10 specific tools
+    authorization:
+      action: Allow
+      policy:
+        matchExpressions:
+          - "mcp.tool.name in ['k8s_get_resources', 'k8s_describe_resource', 'k8s_get_resource_yaml', 'k8s_get_pod_logs', 'k8s_get_events', 'helm_list_releases', 'helm_get_release', 'cilium_status_and_version', 'istio_version', 'prometheus_query_tool']"
+  # Prompt Guard - Block prompt injection and mask sensitive data
+  backend:
+    ai:
+      promptGuard:
+        request:
+          - response:
+              message: "Blocked: Prompt injection or sensitive content detected"
+            regex:
+              action: Reject
+              matches:
+                - "ignore previous instructions"
+                - "system prompt"
+                - "jailbreak"
+              builtins:
+                - CreditCard
+                - Ssn
+        response:
+          - regex:
+              action: Mask
+              builtins:
+                - CreditCard
+                - Ssn
+                - Email

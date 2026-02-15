@@ -7,6 +7,9 @@ import {
   ScoreBreakdown,
   TrendPoint,
   GovernanceData,
+  MCPServersResponse,
+  MCPServerView,
+  MCPServerSummary,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
@@ -51,4 +54,16 @@ export async function getFullEvaluation(): Promise<GovernanceData> {
 
 export async function getResourceDetail(): Promise<ResourceDetailResponse> {
   return fetchAPI('/api/governance/resources/detail');
+}
+
+export async function getMCPServers(): Promise<MCPServersResponse> {
+  return fetchAPI('/api/governance/mcp-servers');
+}
+
+export async function getMCPServerSummary(): Promise<MCPServerSummary> {
+  return fetchAPI('/api/governance/mcp-servers/summary');
+}
+
+export async function getMCPServerDetail(id: string): Promise<MCPServerView> {
+  return fetchAPI(`/api/governance/mcp-servers/detail?id=${encodeURIComponent(id)}`);
 }

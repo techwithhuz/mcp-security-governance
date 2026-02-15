@@ -43,6 +43,10 @@ spec:
                   type: boolean
                   default: false
                   description: "Enforces rate limiting on MCP endpoints"
+                scanInterval:
+                  type: string
+                  default: "5m"
+                  description: "Interval between governance scans (e.g. '30s', '5m', '10m', '1h'). Default: '5m'"
                 maxToolsWarning:
                   type: integer
                   default: 10
