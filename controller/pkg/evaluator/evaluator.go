@@ -1225,7 +1225,35 @@ func calculateOverallScore(breakdown ScoreBreakdown, weights ScoringWeights, pol
 func aggregateBreakdownFromMCPViews(views []MCPServerView, policy Policy) ScoreBreakdown {
 	n := len(views)
 	if n == 0 {
-		return ScoreBreakdown{}
+		// No MCP servers discovered — mark all required categories as infra-absent
+		infraAbsent := make(map[string]bool)
+		if policy.RequireAgentGateway {
+			infraAbsent["AgentGateway Compliance"] = true
+			infraAbsent["Agent Gateway"] = true
+		}
+		if policy.RequireJWTAuth {
+			infraAbsent["Authentication"] = true
+		}
+		if policy.RequireRBAC {
+			infraAbsent["Authorization"] = true
+		}
+		if policy.RequireTLS {
+			infraAbsent["TLS"] = true
+		}
+		if policy.RequireCORS {
+			infraAbsent["CORS"] = true
+		}
+		if policy.RequireRateLimit {
+			infraAbsent["Rate Limit"] = true
+		}
+		if policy.RequirePromptGuard {
+			infraAbsent["Prompt Guard"] = true
+		}
+		bd := ScoreBreakdown{}
+		if len(infraAbsent) > 0 {
+			bd.InfraAbsent = infraAbsent
+		}
+		return bd
 	}
 
 	var sumGW, sumAuth, sumAuthz, sumTLS, sumCORS, sumRL, sumPG, sumTool int
