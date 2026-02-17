@@ -13,6 +13,7 @@ import (
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/aiagent"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/discovery"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/evaluator"
+	"github.com/techwithhuz/mcp-security-governance/controller/pkg/watcher"
 )
 
 var (
@@ -40,6 +41,10 @@ var (
 	// Governance scan state
 	lastScanTime  time.Time  // when the last governance scan completed
 	scanInterval  = 5 * time.Minute // default; overridden by policy.ScanInterval
+	scanMode      = "watch" // "watch" (reconcile on change) or "poll" (periodic timer)
+
+	// Resource watcher (reconcile-based scanning)
+	resourceWatcher *watcher.ResourceWatcher
 )
 
 func main() {
@@ -79,7 +84,7 @@ func main() {
 		initAIAgent(context.Background())
 	}
 
-	// Parse scan interval from policy
+	// Parse scan interval from policy (used as resync period for watcher fallback)
 	if policy.ScanInterval != "" {
 		if d, err := time.ParseDuration(policy.ScanInterval); err == nil && d >= 30*time.Second {
 			scanInterval = d
@@ -88,16 +93,32 @@ func main() {
 		}
 	}
 	lastScanTime = time.Now()
-	log.Printf("[governance] Scan interval set to %v (configurable via spec.scanInterval in MCPGovernancePolicy)", scanInterval)
 
-	// Periodic re-evaluation using policy-driven interval
-	go func() {
-		ticker := time.NewTicker(scanInterval)
-		defer ticker.Stop()
-		for range ticker.C {
-			doPeriodicScan()
+	// Start resource watcher (reconcile on change) or fall back to periodic polling
+	if discoverer != nil {
+		w, err := watcher.New(watcher.Config{
+			DynamicClient: discoverer.DynamicClient(),
+			Reconcile: func(reason string) {
+				doPeriodicScan()
+			},
+			Debounce:     3 * time.Second,
+			ResyncPeriod: scanInterval, // full resync as safety net
+		})
+		if err != nil {
+			log.Printf("[governance] WARNING: Failed to create resource watcher: %v — falling back to polling", err)
+			scanMode = "poll"
+			startPollingLoop()
+		} else {
+			resourceWatcher = w
+			scanMode = "watch"
+			log.Printf("[governance] Watch mode enabled — reconciling on resource changes (resync every %v)", scanInterval)
+			go resourceWatcher.Start(context.Background())
 		}
-	}()
+	} else {
+		scanMode = "poll"
+		log.Printf("[governance] No K8s connection — using polling mode (every %v)", scanInterval)
+		startPollingLoop()
+	}
 
 	// API routes
 	mux := http.NewServeMux()
@@ -170,13 +191,31 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	stateMu.RLock()
 	scanTime := lastScanTime
 	interval := scanInterval
+	mode := scanMode
 	stateMu.RUnlock()
-	jsonResponse(w, map[string]interface{}{
+
+	resp := map[string]interface{}{
 		"status":       "healthy",
 		"version":      Version,
 		"lastScanTime": scanTime.Format(time.RFC3339),
 		"scanInterval": interval.String(),
-	})
+		"scanMode":     mode,
+	}
+
+	// Include watcher stats if in watch mode
+	if mode == "watch" && resourceWatcher != nil {
+		stats := resourceWatcher.Stats()
+		resp["watcher"] = map[string]interface{}{
+			"activeWatches":  stats.ActiveWatches,
+			"totalGVRs":      stats.TotalGVRs,
+			"eventCount":     stats.EventCount,
+			"reconcileCount": stats.ReconcileCount,
+			"lastEvent":      stats.LastEvent.Format(time.RFC3339),
+			"lastReconcile":  stats.LastReconcile.Format(time.RFC3339),
+		}
+	}
+
+	jsonResponse(w, resp)
 }
 
 func getGrade(score int) string {
@@ -964,6 +1003,18 @@ func doPeriodicScan() {
 	}
 }
 
+// startPollingLoop starts a traditional ticker-based scan loop.
+// Used as fallback when the resource watcher cannot be created.
+func startPollingLoop() {
+	go func() {
+		ticker := time.NewTicker(scanInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			doPeriodicScan()
+		}
+	}()
+}
+
 // handleRefreshScan triggers an on-demand governance scan (POST only)
 func handleRefreshScan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -994,15 +1045,29 @@ func handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	scanTime := lastScanTime
 	interval := scanInterval
 	p := policy
+	mode := scanMode
 	stateMu.RUnlock()
 
-	nextScan := scanTime.Add(interval)
-	jsonResponse(w, map[string]interface{}{
+	resp := map[string]interface{}{
 		"lastScanTime":     scanTime.Format(time.RFC3339),
 		"scanInterval":     interval.String(),
-		"nextScanTime":     nextScan.Format(time.RFC3339),
 		"scanIntervalSpec": p.ScanInterval,
-	})
+		"scanMode":         mode,
+	}
+
+	if mode == "watch" {
+		resp["description"] = "Reconcile-on-change mode: the controller watches Kubernetes resources and re-evaluates governance scores within seconds of any change."
+		if resourceWatcher != nil {
+			stats := resourceWatcher.Stats()
+			resp["watcher"] = stats
+		}
+	} else {
+		nextScan := scanTime.Add(interval)
+		resp["nextScanTime"] = nextScan.Format(time.RFC3339)
+		resp["description"] = "Polling mode: the controller periodically scans the cluster at a fixed interval."
+	}
+
+	jsonResponse(w, resp)
 }
 
 // handleMCPServers returns all MCP server views with their scores and related resources
