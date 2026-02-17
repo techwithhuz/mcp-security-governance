@@ -201,6 +201,8 @@ func (d *K8sDiscoverer) discoverHTTPRoutes(ctx context.Context) []evaluator.HTTP
 				}
 				name, _ := getNestedString(pm, "name")
 				hr.ParentGateway = name
+				ns, _ := getNestedString(pm, "namespace")
+				hr.ParentGatewayNamespace = ns
 			}
 
 			// Get backend refs

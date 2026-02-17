@@ -58,6 +58,7 @@ jobs:
   dashboard-image:
     name: Dashboard Image
     runs-on: ubuntu-latest
+    needs: [controller-image]
     steps:
       - uses: actions/checkout@v4
 

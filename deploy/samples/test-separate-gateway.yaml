@@ -1,0 +1,97 @@
+---
+# ============================================
+# TEST: Separate Gateway + MCP Server
+# This creates resources in the 'default' namespace
+# to test that gateway/policy correlation is scoped
+# correctly per MCP server.
+# ============================================
+
+# A separate Gateway in default namespace
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: test-mcp-gateway
+  namespace: default
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 9090
+
+---
+# A RemoteMCPServer in default namespace
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: test-mcp-server
+  namespace: default
+spec:
+  description: Test MCP server for gateway correlation testing
+  protocol: STREAMABLE_HTTP
+  url: http://test-mcp.default.svc.cluster.local:8080/mcp
+  timeout: 30s
+
+---
+# AgentgatewayBackend for the test MCP server
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: test-mcp-backend
+  namespace: default
+spec:
+  mcp:
+    targets:
+      - name: test-mcp-server
+        static:
+          host: test-mcp.default.svc.cluster.local
+          port: 8080
+          path: /mcp
+          protocol: StreamableHTTP
+
+---
+# HTTPRoute for test MCP server - references test-mcp-gateway
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: test-mcp-route
+  namespace: default
+spec:
+  parentRefs:
+    - name: test-mcp-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp/test
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: test-mcp-backend
+
+---
+# AgentgatewayPolicy targeting the test HTTPRoute
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: test-mcp-policy
+  namespace: default
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: test-mcp-route
+  traffic:
+    jwtAuthentication:
+      mode: Permissive
+      providers:
+        - issuer: https://test-auth.example.com
+          audiences:
+            - test-agents
+          jwks:
+            inline: '{"keys":[]}'
+    rateLimit:
+      local:
+        - unit: Minutes
+          requests: 50
+          burst: 10

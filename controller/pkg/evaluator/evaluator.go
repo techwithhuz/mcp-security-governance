@@ -179,11 +179,12 @@ type PolicyTargetRef struct {
 }
 
 type HTTPRouteResource struct {
-	Name            string
-	Namespace       string
-	ParentGateway   string
-	BackendRefs     []string
-	HasCORSFilter   bool
+	Name                   string
+	Namespace              string
+	ParentGateway          string
+	ParentGatewayNamespace string // defaults to route's own namespace if empty
+	BackendRefs            []string
+	HasCORSFilter          bool
 }
 
 // ---- kagent resource representations ----

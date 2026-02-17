@@ -207,9 +207,10 @@ func correlateMCPServer(view *MCPServerView, state *ClusterState, findings []Fin
 				Namespace: route.Namespace,
 				Status:    mcpRouteStatus(route),
 				Details: map[string]interface{}{
-					"parentGateway":      route.ParentGateway,
-					"hasCORSFilter":      route.HasCORSFilter,
-					"usesAGWBackend":     routeUsesAGWBackend,
+					"parentGateway":          route.ParentGateway,
+					"parentGatewayNamespace": route.ParentGatewayNamespace,
+					"hasCORSFilter":          route.HasCORSFilter,
+					"usesAGWBackend":         routeUsesAGWBackend,
 				},
 			})
 			if route.HasCORSFilter {
@@ -224,14 +225,24 @@ func correlateMCPServer(view *MCPServerView, state *ClusterState, findings []Fin
 	}
 
 	// --- Find related Gateways ---
-	gwNames := map[string]bool{}
+	// Only include gateways that are explicitly referenced as parentGateway
+	// by this MCP server's related routes. We match by name AND namespace.
+	// The parentRef namespace defaults to the route's own namespace per Gateway API spec.
+	type gwKey struct{ name, ns string }
+	gwKeys := map[gwKey]bool{}
 	for _, route := range view.RelatedRoutes {
-		if details, ok := route.Details["parentGateway"].(string); ok && details != "" {
-			gwNames[details] = true
+		parentName, _ := route.Details["parentGateway"].(string)
+		if parentName != "" {
+			// Use explicit parentGatewayNamespace if set, otherwise default to route's namespace
+			parentNS, _ := route.Details["parentGatewayNamespace"].(string)
+			if parentNS == "" {
+				parentNS = route.Namespace
+			}
+			gwKeys[gwKey{parentName, parentNS}] = true
 		}
 	}
 	for _, gw := range state.Gateways {
-		if gwNames[gw.Name] || gw.GatewayClassName == "agentgateway" {
+		if gwKeys[gwKey{gw.Name, gw.Namespace}] {
 			view.RelatedGateways = append(view.RelatedGateways, RelatedResource{
 				Kind:      "Gateway",
 				Name:      gw.Name,
@@ -242,7 +253,6 @@ func correlateMCPServer(view *MCPServerView, state *ClusterState, findings []Fin
 					"programmed":       gw.Programmed,
 				},
 			})
-			// Also mark routed if the gateway is an agentgateway and we have related backends
 			if gw.GatewayClassName == "agentgateway" && len(view.RelatedBackends) > 0 {
 				view.RoutedThroughGateway = true
 			}
@@ -250,16 +260,22 @@ func correlateMCPServer(view *MCPServerView, state *ClusterState, findings []Fin
 	}
 
 	// --- Find related Policies ---
+	// A policy is related to this MCP server if its targetRef points to one of
+	// the server's related gateways or routes. We compare by name AND namespace
+	// (the targetRef namespace defaults to the policy's own namespace per Gateway API).
 	for _, p := range state.AgentgatewayPolicies {
 		related := false
 		for _, tr := range p.TargetRefs {
+			// Determine the effective namespace for this targetRef
+			// (Gateway API: defaults to the policy's own namespace)
+			trNS := p.Namespace
 			for _, gw := range view.RelatedGateways {
-				if tr.Kind == "Gateway" && tr.Name == gw.Name {
+				if tr.Kind == "Gateway" && tr.Name == gw.Name && trNS == gw.Namespace {
 					related = true
 				}
 			}
 			for _, rt := range view.RelatedRoutes {
-				if tr.Kind == "HTTPRoute" && tr.Name == rt.Name {
+				if tr.Kind == "HTTPRoute" && tr.Name == rt.Name && trNS == rt.Namespace {
 					related = true
 				}
 			}
@@ -591,7 +607,22 @@ func scoreMCPServer(view *MCPServerView, policy Policy) {
 	}
 
 	// Tool Scope - score based on effective tool count (after policy restrictions)
-	if policy.MaxToolsCritical > 0 && view.EffectiveToolCount > policy.MaxToolsCritical {
+	// An MCP server with 0 tools is not properly configured
+	if view.ToolCount == 0 {
+		bd.ToolScope = 0
+		// Add a finding for 0-tools
+		view.Findings = append(view.Findings, Finding{
+			ID:          fmt.Sprintf("TOOLS-000-%s", view.Name),
+			Severity:    SeverityHigh,
+			Category:    "Tool Governance",
+			Title:       fmt.Sprintf("MCP server %s has no tools", view.Name),
+			Description: fmt.Sprintf("The MCP server '%s' in namespace '%s' has 0 tools discovered. Tools should be attached to the MCP server for proper governance.", view.Name, view.Namespace),
+			Impact:      "Without tools, the MCP server cannot serve AI agents, and tool-level governance cannot be applied.",
+			Remediation: "Ensure the MCP server exposes tools and that tool discovery is working correctly. Verify the MCP server spec.tools or spec.toolsets configuration.",
+			ResourceRef: view.ID,
+			Namespace:   view.Namespace,
+		})
+	} else if policy.MaxToolsCritical > 0 && view.EffectiveToolCount > policy.MaxToolsCritical {
 		bd.ToolScope = 0
 	} else if policy.MaxToolsWarning > 0 && view.EffectiveToolCount > policy.MaxToolsWarning {
 		bd.ToolScope = 50
@@ -617,7 +648,7 @@ func scoreMCPServer(view *MCPServerView, policy Policy) {
 		{bd.CORS, w.CORSPolicy, policy.RequireCORS},
 		{bd.RateLimit, w.RateLimit, policy.RequireRateLimit},
 		{bd.PromptGuard, w.PromptGuard, policy.RequirePromptGuard},
-		{bd.ToolScope, w.ToolScope, policy.MaxToolsWarning > 0 || policy.MaxToolsCritical > 0},
+		{bd.ToolScope, w.ToolScope, policy.MaxToolsWarning > 0 || policy.MaxToolsCritical > 0 || view.ToolCount == 0},
 	}
 
 	for _, e := range entries {
@@ -995,6 +1026,10 @@ func buildScoreExplanations(view *MCPServerView, policy Policy) []ScoreExplanati
 		if !hasToolPolicy {
 			exp.Status = "not-required"
 			exp.Reasons = []string{"Tool scope limits are not configured in the governance policy."}
+		} else if view.ToolCount == 0 {
+			exp.Status = "fail"
+			exp.Reasons = []string{"No tools discovered for this MCP server."}
+			exp.Suggestions = []string{"Ensure the MCP server exposes tools and that tool discovery is working correctly."}
 		} else {
 			exp.Status = statusFor(bd.ToolScope)
 			if view.HasToolRestriction {
