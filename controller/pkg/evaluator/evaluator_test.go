@@ -43,7 +43,7 @@ func fullCompliantState() *ClusterState {
 			},
 		},
 		HTTPRoutes: []HTTPRouteResource{
-			{Name: "mcp-route", Namespace: "mcp-system", ParentGateway: "agentgateway", HasCORSFilter: true},
+			{Name: "mcp-route", Namespace: "mcp-system", ParentGateway: "agentgateway", ParentGatewayNamespace: "agentgateway-system", BackendRefs: []string{"mcp-backend"}, HasCORSFilter: true},
 		},
 		KagentAgents: []KagentAgentResource{
 			{Name: "agent-1", Namespace: "mcp-system", Type: "Declarative", Ready: true},
