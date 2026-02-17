@@ -59,6 +59,12 @@ func NewK8sDiscoverer() (*K8sDiscoverer, error) {
 	}, nil
 }
 
+// DynamicClient returns the underlying dynamic Kubernetes client.
+// This is used by the resource watcher to set up informers.
+func (d *K8sDiscoverer) DynamicClient() dynamic.Interface {
+	return d.dynamicClient
+}
+
 // DiscoverClusterState discovers all relevant resources from the cluster
 func (d *K8sDiscoverer) DiscoverClusterState(ctx context.Context) *evaluator.ClusterState {
 	state := &evaluator.ClusterState{}
