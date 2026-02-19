@@ -117,6 +117,118 @@ spec:
                         type: integer
                       findings:
                         type: integer
+                verifiedCatalogScores:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      catalogName:
+                        type: string
+                        description: "Name of the MCPServerCatalog resource"
+                      namespace:
+                        type: string
+                        description: "Namespace of the MCPServerCatalog"
+                      resourceVersion:
+                        type: string
+                        description: "Resource version of the catalog"
+                      status:
+                        type: string
+                        enum: ["Verified", "Unverified", "Rejected", "Pending"]
+                        description: "Overall verification status based on scoring"
+                      compositeScore:
+                        type: integer
+                        description: "Final composite score (0-100)"
+                      securityScore:
+                        type: integer
+                        description: "Security category score (transport + deployment checks, 0-100)"
+                      trustScore:
+                        type: integer
+                        description: "Trust category score (publisher verification, 0-100)"
+                      complianceScore:
+                        type: integer
+                        description: "Compliance category score (tool scope + usage, 0-100)"
+                      checks:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              description: "Check ID (e.g., PUB-001, SEC-001, TOOL-001)"
+                            name:
+                              type: string
+                            points:
+                              type: integer
+                              description: "Points earned for this check"
+                            maxPoints:
+                              type: integer
+                              description: "Maximum points possible for this check"
+                      lastScored:
+                        type: string
+                        format: date-time
+                        description: "Timestamp of last scoring evaluation"
+                mcpServerScores:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        description: "Name of the MCP Server (KagentMCPServer or RemoteMCPServer)"
+                      namespace:
+                        type: string
+                      source:
+                        type: string
+                        description: "Source type (KagentMCPServer, RemoteMCPServer, AgentgatewayBackendTarget)"
+                      status:
+                        type: string
+                        enum: ["compliant", "warning", "failing", "critical"]
+                        description: "Governance compliance status"
+                      score:
+                        type: integer
+                        description: "Governance score (0-100)"
+                      scoreBreakdown:
+                        type: object
+                        properties:
+                          gatewayRouting:
+                            type: integer
+                          authentication:
+                            type: integer
+                          authorization:
+                            type: integer
+                          tls:
+                            type: integer
+                          cors:
+                            type: integer
+                          rateLimit:
+                            type: integer
+                          promptGuard:
+                            type: integer
+                          toolScope:
+                            type: integer
+                      toolCount:
+                        type: integer
+                        description: "Total number of tools exposed by this server"
+                      effectiveToolCount:
+                        type: integer
+                        description: "Number of tools after policy enforcement"
+                      relatedResources:
+                        type: object
+                        properties:
+                          gateways:
+                            type: integer
+                          backends:
+                            type: integer
+                          policies:
+                            type: integer
+                          routes:
+                            type: integer
+                      criticalFindings:
+                        type: integer
+                        description: "Number of critical/failing findings"
+                      lastEvaluated:
+                        type: string
+                        format: date-time
                 lastEvaluationTime:
                   type: string
                   format: date-time

@@ -31,6 +31,28 @@ spec:
     high: 25
     medium: 15
     low: 5
+  # Verified Catalog Scoring configuration
+  verifiedCatalogScoring:
+    # Category weights (should sum to 100)
+    # Controls how the final composite score is computed
+    securityWeight: 50      # Weight for security score
+    trustWeight: 30         # Weight for trust score
+    complianceWeight: 20    # Weight for compliance score
+    # Status thresholds
+    verifiedThreshold: 70   # Score >= 70 → "Verified"
+    unverifiedThreshold: 50 # Score >= 50 → "Unverified", < 50 → "Rejected"
+    # Per-check maximum scores (customize severity of each check)
+    checkMaxScores:
+      PUB-001: 20  # Publisher Verification
+      PUB-002: 15  # Code Signing
+      PUB-003: 15  # Publisher Trust
+      SEC-001: 15  # Transport Security
+      SEC-002: 10  # Deployment Security
+      DEP-001: 10  # Dependency Analysis
+      DEP-002: 10  # Vulnerability Scanning
+      DEP-003: 10  # License Compliance
+      TOOL-001: 5  # Tool Scope
+      USE-001: 5   # Usage Patterns
   # targetNamespaces is empty – scan all namespaces by default
   targetNamespaces: []
   excludeNamespaces:

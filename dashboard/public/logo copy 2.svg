@@ -1,4 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+<svg xmlns="http://www.w3.o  <!-- Big "G" letter as a solid filled shape -->
+  <text x="100" y="145" font-family="Arial, sans-serif"
+        font-size="140" font-weight="900" fill="#c084fc" text-anchor="middle"
+        opacity="0.95">G</text>
+
+  <!-- "MCP" text placed on the horizontal bar of G -->
+  <text x="118" y="125" font-family="Arial, sans-serif"
+        font-size="28" font-weight="800" fill="white" text-anchor="middle"
+        letter-spacing="1" opacity="0.95">MCP</text> viewBox="0 0 200 200" width="200" height="200">
   <defs>
     <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
@@ -25,9 +33,15 @@
   <path d="M100 38 L155 63 L155 105 C155 135 132 157 100 168 C68 157 45 135 45 105 L45 63 Z"
         fill="#1e1b4b" opacity="0.85" />
 
-  <!-- "MCP-G" text centered in shield -->
-  <text x="100" y="120" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
-        font-size="30" font-weight="700" fill="white" text-anchor="middle" letter-spacing="1">MCP<tspan fill="white">-</tspan><tspan fill="#c084fc">G</tspan></text>
+  <!-- Big "G" letter as a solid filled shape -->
+  <text x="100" y="145" font-family="Arial, sans-serif"
+        font-size="140" font-weight="900" fill="#c084fc" text-anchor="middle"
+        opacity="0.95">G</text>
+
+  <!-- "MCP" text written on the horizontal bar of G -->
+  <text x="120" y="100" font-family="Arial, sans-serif"
+        font-size="32" font-weight="900" fill="white" text-anchor="middle"
+        dominant-baseline="central" letter-spacing="1">MCP</text>
 
   <!-- Small accent nodes (representing connected MCP endpoints) -->
   <circle cx="100" cy="28" r="4" fill="#c7d2fe" opacity="0.9"/>

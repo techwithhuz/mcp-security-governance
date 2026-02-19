@@ -26,8 +26,10 @@
           fill="url(#shieldInner)" opacity="0.6" />
     <path d="M100 38 L155 63 L155 105 C155 135 132 157 100 168 C68 157 45 135 45 105 L45 63 Z"
           fill="#1e1b4b" opacity="0.85" />
-    <text x="100" y="115" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
-          font-size="30" font-weight="800" fill="white" text-anchor="middle" letter-spacing="0">MCP<tspan fill="white">-</tspan><tspan fill="#c084fc">G</tspan></text>
+    <text x="67" y="122" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+          font-size="56" font-weight="800" fill="white" letter-spacing="-2">M</text>
+    <text x="110" y="122" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+          font-size="56" font-weight="800" fill="#a5b4fc" letter-spacing="-2">G</text>
     <circle cx="100" cy="28" r="4" fill="#c7d2fe" opacity="0.9"/>
     <circle cx="35" cy="80" r="3" fill="#c7d2fe" opacity="0.6"/>
     <circle cx="165" cy="80" r="3" fill="#c7d2fe" opacity="0.6"/>

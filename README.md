@@ -25,6 +25,7 @@
 - [Overview](#-overview)
 - [Architecture](#-architecture)
 - [What It Checks](#-what-it-checks)
+- [Verified Catalog Scoring](#-verified-catalog-scoring)
 - [MCP-Server-Centric Scoring](#-mcp-server-centric-scoring)
 - [Scoring Model](#-scoring-model)
 - [AI-Powered Governance Scoring](#-ai-powered-governance-scoring)
@@ -54,12 +55,13 @@ As AI agents powered by the **Model Context Protocol (MCP)** proliferate across 
 
 **MCP Governance** solves this by:
 
-1. **Discovering** all MCP-related resources in your cluster — AgentGateway backends, policies, Kagent agents, MCPServers, RemoteMCPServers, Gateway API routes
+1. **Discovering** all MCP-related resources in your cluster — AgentGateway backends, policies, Kagent agents, MCPServers, RemoteMCPServers, MCPServerCatalog entries, Gateway API routes
 2. **Correlating** resources into an **MCP-Server-centric view** — each MCP server is scored independently based on its related gateway routes, security policies, and tool exposure
 3. **Evaluating** each MCP server against a configurable security policy defined as a Kubernetes CRD across **8 governance categories**: AgentGateway routing, authentication, authorization, CORS, TLS, prompt guard, rate limiting, and tool scope
-4. **Scoring** your cluster's MCP security posture on a 0–100 scale where the cluster score is the **weighted average of per-server scores**
-5. **AI-Powered Analysis** — optionally runs an AI agent (Google Gemini or local Ollama) alongside the algorithmic scorer for deeper risk analysis, reasoning, and actionable suggestions
-6. **Surfacing** findings, tool exposure metrics, and per-server security details in a real-time dashboard with interactive score explanations
+4. **Verified Catalog Scoring** — scores MCP server catalog entries from your Agent Registry based on publisher verification (25pts), transport security (20pts), deployment health (20pts), tool scope (18pts), and usage patterns (17pts)
+5. **Scoring** your cluster's MCP security posture on a 0–100 scale where the cluster score is the **weighted average of per-server scores**, plus catalog integrity assessment
+6. **AI-Powered Analysis** — optionally runs an AI agent (Google Gemini or local Ollama) alongside the algorithmic scorer for deeper risk analysis, reasoning, and actionable suggestions
+7. **Surfacing** findings, tool exposure metrics, catalog verification status, and per-server security details in a real-time dashboard with interactive score explanations and governance insights
 
 ---
 
@@ -159,6 +161,177 @@ graph TB
 | **Rate Limiting** | Rate limit policies on MCP endpoints | Medium |
 | **Tool Scope** | Per-server tool count vs configured thresholds | Warning / Critical |
 | **Exposure** | Direct MCP server exposure without gateway — auto-escalates to Critical | Critical |
+
+---
+
+## 📦 Verified Catalog Scoring
+
+**Verified Catalog** is a governance framework that scores MCP server catalog entries from your Agent Registry based on publisher verification, transport security, deployment readiness, tool scope compliance, and operational usage patterns.
+
+### What It Evaluates
+
+Each MCPServerCatalog resource is independently scored across 5 governance categories:
+
+| Category | What's Checked | Max Points | Details |
+|---|---|---|---|
+| **Publisher Verification** | Organization and publisher credibility | 25 | Validates publisher identity, organization verification, and signing certificates |
+| **Transport Security** | Connection encryption and protocols | 20 | Checks for TLS support, secure remote URLs, and protocol compliance |
+| **Deployment Health** | Deployment readiness and availability | 20 | Verifies published status, deployment ready state, and management type |
+| **Tool Scope** | Tool count and exposure compliance | 18 | Ensures tool count stays within configured thresholds and limits |
+| **Usage & Integration** | Operational integration patterns | 17 | Tracks agent usage, integration diversity, and operational maturity |
+
+### Verified Catalog Score Breakdown
+
+Each catalog entry receives:
+
+- **Composite Score (0–100)** — Overall verification score
+- **Grade (A–F)** — Letter grade based on score ranges
+- **Status** — `Verified` · `Unverified` · `Rejected` · `Pending`
+- **Category Scores** — Individual 0–100 scores for each governance category:
+  - `securityScore` — Transport security + deployment checks
+  - `trustScore` — Publisher verification + organization credibility
+  - `complianceScore` — Tool scope + usage compliance
+- **Check Details** — Per-check pass/fail status with points earned vs max points
+- **Findings** — Critical, High, Medium, Low severity issues discovered
+
+### Catalog Verification Checks
+
+| Check ID | Category | What It Verifies | Pass Criteria |
+|---|---|---|---|
+| **PUB-001** | Publisher | Organization verification present | Verified org field populated |
+| **PUB-002** | Publisher | Publisher identity verified | Verified publisher field populated |
+| **SEC-001** | Transport | Remote URL uses HTTPS | URL starts with `https://` |
+| **SEC-002** | Transport | Supported transport protocol | Transport field matches allowed types |
+| **DEP-001** | Deployment | Catalog published | Published status = true |
+| **DEP-002** | Deployment | Deployment ready | DeploymentReady status = true |
+| **DEP-003** | Deployment | Management type valid | ManagementType in [managed, external] |
+| **TOOL-001** | Tool Scope | Tool count within limits | toolCount <= threshold |
+| **TOOL-002** | Tool Scope | Tool list available | toolNames array populated |
+| **USAGE-001** | Usage | Agent integration present | usedByAgents array not empty |
+| **USAGE-002** | Usage | Multiple agent usage | usedByAgents.length >= 2 |
+| **USAGE-003** | Usage | Version compliance | Version field present and valid |
+
+### Dashboard Verified Catalog Tab
+
+The dashboard includes a dedicated **Verified Catalog** tab that displays:
+
+1. **Summary Stats**
+   - Total catalogs discovered
+   - Average verification score
+   - Distribution by status (Verified, Unverified, Rejected, Pending)
+   - Critical/High severity findings count
+
+2. **Catalog List** with:
+   - Score ring visualization (0–100)
+   - Grade badge (A–F)
+   - Status indicator (color-coded)
+   - Namespace, source kind, transport protocol, version
+   - Last evaluated timestamp
+
+3. **Expandable Detail View** (click to expand):
+   - Full security assessment per governance category
+   - Category-level progress bars and scores
+   - Individual check results (pass/fail with points)
+   - Governance findings with severity and remediation steps
+   - Exposed tools list
+   - Agent consumers (which agents use this catalog)
+   - Connection details (remote URL, package image, TLS status)
+
+### Configuration — Verified Catalog Scoring
+
+Add the `verifiedCatalogScoring` block to your MCPGovernancePolicy:
+
+```yaml
+apiVersion: governance.mcp.io/v1alpha1
+kind: MCPGovernancePolicy
+metadata:
+  name: enterprise-policy
+spec:
+  # ... other fields ...
+  verifiedCatalogScoring:
+    enabled: true
+    weights:
+      security: 50      # Transport + deployment checks
+      trust: 30         # Publisher verification
+      compliance: 20    # Tool scope + usage
+    thresholds:
+      minScoreForVerified: 80
+      minScoreForUnverified: 50
+      checkMaxScores:
+        publisher: 25
+        transport: 20
+        deployment: 20
+        toolScope: 18
+        usage: 17
+```
+
+### API Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/governance/inventory/verified` | List all verified catalogs with scores and summaries |
+| `GET /api/governance/inventory/verified/{namespace}/{name}` | Get detailed scoring for a specific catalog |
+
+### Response Format
+
+```json
+{
+  "resources": [
+    {
+      "name": "my-grafana-mcp",
+      "namespace": "default",
+      "catalogName": "kagent/my-grafana-mcp",
+      "verifiedScore": {
+        "score": 85,
+        "grade": "B",
+        "status": "Verified",
+        "securityScore": 90,
+        "trustScore": 75,
+        "complianceScore": 85,
+        "checks": [
+          {
+            "id": "PUB-001",
+            "name": "Organization Verified",
+            "category": "publisher",
+            "passed": true,
+            "score": 10,
+            "maxScore": 10,
+            "detail": "Organization verification present"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "Medium",
+            "category": "toolScope",
+            "title": "High Tool Count",
+            "description": "Catalog exposes 45 tools",
+            "remediation": "Consider restricting tool exposure via CEL policies"
+          }
+        ]
+      },
+      "toolNames": ["get_dashboard", "create_alert", ...],
+      "usedByAgents": [
+        {
+          "name": "analytics-agent",
+          "namespace": "ai-agents",
+          "toolNames": ["get_dashboard", "create_alert"]
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "totalCatalogs": 10,
+    "totalScored": 10,
+    "averageScore": 78,
+    "verifiedCount": 7,
+    "unverifiedCount": 2,
+    "rejectedCount": 1,
+    "pendingCount": 0,
+    "warningCount": 3,
+    "criticalCount": 0
+  }
+}
+```
 
 ---
 

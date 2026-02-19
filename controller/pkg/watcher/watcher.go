@@ -72,6 +72,12 @@ func DefaultWatchedResources() []WatchedResource {
 				Group: "governance.mcp.io", Version: "v1alpha1", Resource: "mcpgovernancepolicies",
 			},
 		},
+		{
+			Label: "MCPServerCatalog",
+			GVR: schema.GroupVersionResource{
+				Group: "agentregistry.dev", Version: "v1alpha1", Resource: "mcpservercatalogs",
+			},
+		},
 	}
 }
 

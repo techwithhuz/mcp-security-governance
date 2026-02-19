@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Image from 'next/image';
-import { Shield, RefreshCw, Activity, Clock, AlertTriangle, Wifi, WifiOff, Server, ChevronRight, Plug, Scan, Wrench } from 'lucide-react';
+import { Shield, RefreshCw, Activity, Clock, AlertTriangle, Wifi, WifiOff, Server, ChevronRight, Plug, Scan, Wrench, BadgeCheck } from 'lucide-react';
 import ScoreGauge from '@/components/ScoreGauge';
 import ResourceCards from '@/components/ResourceCards';
 import FindingsTable from '@/components/FindingsTable';
@@ -13,7 +13,8 @@ import ResourceInventory from '@/components/ResourceInventory';
 import AIScoreCard from '@/components/AIScoreCard';
 import MCPServerList from '@/components/MCPServerList';
 import MCPServerDetail from '@/components/MCPServerDetail';
-import type { MCPServerView, MCPServerSummary, MCPServersResponse } from '@/lib/types';
+import VerifiedCatalog from '@/components/VerifiedCatalog';
+import type { MCPServerView, MCPServerSummary, MCPServersResponse, VerifiedResource, VerifiedSummary, VerifiedCatalogResponse, VerifiedInventory } from '@/lib/types';
 
 interface DashboardData {
   score: { score: number; grade: string; phase: string; categories: any[]; explanation: string; severityPenalties?: { Critical: number; High: number; Medium: number; Low: number } };
@@ -23,6 +24,7 @@ interface DashboardData {
   trends: { trends: any[] };
   resourceDetail: { resources: any[]; total: number };
   mcpServers: MCPServersResponse;
+  verifiedCatalog: VerifiedCatalogResponse;
 }
 
 export default function Dashboard() {
@@ -31,10 +33,10 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings'>('overview');
+  const [activeTab, setActiveTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog'>('overview');
   const [version, setVersion] = useState('');
   const [selectedMCPServer, setSelectedMCPServer] = useState<MCPServerView | null>(null);
-  const [previousTab, setPreviousTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | null>(null);
+  const [previousTab, setPreviousTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | null>(null);
   const [lastScanTime, setLastScanTime] = useState<string>('');
   const [scanInterval, setScanInterval] = useState<string>('');
   const [scanning, setScanning] = useState(false);
@@ -46,7 +48,7 @@ export default function Dashboard() {
   const fetchData = useCallback(async () => {
     try {
       setRefreshing(true);
-      const [score, findings, resources, breakdown, trends, resourceDetail, mcpServers, health] = await Promise.all([
+      const [score, findings, resources, breakdown, trends, resourceDetail, mcpServers, verifiedCatalog, health] = await Promise.all([
         fetch('/api/governance/score').then(r => r.json()),
         fetch('/api/governance/findings').then(r => r.json()),
         fetch('/api/governance/resources').then(r => r.json()),
@@ -54,13 +56,14 @@ export default function Dashboard() {
         fetch('/api/governance/trends').then(r => r.json()),
         fetch('/api/governance/resources/detail').then(r => r.json()),
         fetch('/api/governance/mcp-servers').then(r => r.json()).catch(() => ({ servers: [], summary: {} })),
+        fetch('/api/governance/inventory/verified').then(r => r.json()).catch(() => ({ resources: [], summary: { totalCatalogs: 0, totalScored: 0, verifiedCount: 0, unverifiedCount: 0, rejectedCount: 0, pendingCount: 0, warningCount: 0, criticalCount: 0, averageScore: 0, totalTools: 0, totalAgentUsages: 0, lastReconcile: '' } })),
         fetch('/api/health').then(r => r.json()).catch(() => null),
       ]);
 
       if (health?.version) setVersion(health.version);
       if (health?.lastScanTime) setLastScanTime(health.lastScanTime);
       if (health?.scanInterval) setScanInterval(health.scanInterval);
-      setData({ score, findings, resources, breakdown, trends, resourceDetail, mcpServers });
+      setData({ score, findings, resources, breakdown, trends, resourceDetail, mcpServers, verifiedCatalog });
       setConnected(true);
       setError(null);
 
@@ -237,6 +240,7 @@ export default function Dashboard() {
             {[
               { id: 'overview' as const, label: 'Overview', icon: Activity },
               { id: 'mcp-servers' as const, label: 'MCP Servers', icon: Plug },
+              { id: 'verified-catalog' as const, label: 'Verified Catalog', icon: BadgeCheck },
               { id: 'resources' as const, label: 'Resource Inventory', icon: Server },
               { id: 'findings' as const, label: 'All Findings', icon: AlertTriangle },
             ].map(tab => (
@@ -254,6 +258,11 @@ export default function Dashboard() {
                 {tab.id === 'mcp-servers' && data.mcpServers?.summary?.totalMCPServers > 0 && (
                   <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-blue-500/15 text-blue-400 font-bold tabular-nums">
                     {data.mcpServers.summary.totalMCPServers}
+                  </span>
+                )}
+                {tab.id === 'verified-catalog' && data.verifiedCatalog?.summary?.totalCatalogs > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-green-500/15 text-green-400 font-bold tabular-nums">
+                    {data.verifiedCatalog.summary.totalCatalogs}
                   </span>
                 )}
                 {tab.id === 'resources' && (
@@ -302,6 +311,31 @@ export default function Dashboard() {
             />
           )
         )}
+
+        {/* ========== VERIFIED CATALOG TAB ========== */}
+        {activeTab === 'verified-catalog' && (() => {
+          const vcRes: VerifiedResource[] = data.verifiedCatalog?.resources || [];
+          const vcSum = data.verifiedCatalog?.summary;
+          const inventory: VerifiedInventory = {
+            items: vcRes.map(r => ({
+              ...r.verifiedScore,
+              resourceRef: `${r.namespace}/${r.name}`,
+              catalogName: r.catalogName || r.name,
+              namespace: r.namespace,
+              mcpServerIDs: (r.usedByAgents || []).map(a => `${a.namespace}/${a.name}`),
+              scoredAt: r.verifiedScore.lastEvaluated,
+              toolNames: r.toolNames || [],
+              usedByAgents: r.usedByAgents || [],
+            })),
+            averageScore: vcSum?.averageScore ?? 0,
+            totalScored: vcSum?.totalScored ?? vcSum?.totalCatalogs ?? 0,
+            totalVerified: vcSum?.verifiedCount ?? 0,
+            totalUnverified: vcSum?.unverifiedCount ?? 0,
+            totalRejected: vcSum?.rejectedCount ?? 0,
+            totalPending: vcSum?.pendingCount ?? 0,
+          };
+          return <VerifiedCatalog inventory={inventory} />;
+        })()}
 
         {/* ========== OVERVIEW TAB ========== */}
         {activeTab === 'overview' && (
@@ -471,6 +505,104 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
+
+            {/* Verified Catalog Quick View */}
+            {(data.verifiedCatalog?.resources || []).length > 0 && (() => {
+              const vcResources: VerifiedResource[] = data.verifiedCatalog?.resources || [];
+              const vcSummary: VerifiedSummary = data.verifiedCatalog?.summary || {
+                totalCatalogs: 0, totalScored: 0, verifiedCount: 0, unverifiedCount: 0,
+                rejectedCount: 0, pendingCount: 0, warningCount: 0, criticalCount: 0,
+                averageScore: 0, totalTools: 0, totalAgentUsages: 0, lastReconcile: '',
+              };
+              const avgColor = vcSummary.averageScore >= 70 ? '#22c55e' : vcSummary.averageScore >= 50 ? '#eab308' : '#ef4444';
+              return (
+                <div className="bg-gov-surface rounded-2xl border border-gov-border p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <BadgeCheck size={18} className="text-green-400" />
+                      <h2 className="text-lg font-bold">Verified Catalog</h2>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-green-500/15 text-green-400">
+                        {vcSummary.totalCatalogs}
+                      </span>
+                      <span className="text-xs text-gov-text-3 ml-2">
+                        Avg Score: <span className="font-bold" style={{ color: avgColor }}>{vcSummary.averageScore}</span>
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab('verified-catalog')}
+                      className="flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                      View All <ChevronRight size={14} />
+                    </button>
+                  </div>
+
+                  {/* Quick stats row */}
+                  <div className="grid grid-cols-4 gap-3 mb-4">
+                    <div className="bg-gov-bg rounded-xl border border-green-500/15 p-3 text-center">
+                      <div className="text-2xl font-black text-green-400">{vcSummary.verifiedCount}</div>
+                      <div className="text-[10px] text-gov-text-3 font-semibold uppercase">Verified</div>
+                    </div>
+                    <div className="bg-gov-bg rounded-xl border border-yellow-500/15 p-3 text-center">
+                      <div className="text-2xl font-black text-yellow-400">{vcSummary.unverifiedCount}</div>
+                      <div className="text-[10px] text-gov-text-3 font-semibold uppercase">Unverified</div>
+                    </div>
+                    <div className="bg-gov-bg rounded-xl border border-red-500/15 p-3 text-center">
+                      <div className="text-2xl font-black text-red-400">{vcSummary.rejectedCount}</div>
+                      <div className="text-[10px] text-gov-text-3 font-semibold uppercase">Rejected</div>
+                    </div>
+                    <div className="bg-gov-bg rounded-xl border border-gray-500/15 p-3 text-center">
+                      <div className="text-2xl font-black text-gray-400">{vcSummary.pendingCount}</div>
+                      <div className="text-[10px] text-gov-text-3 font-semibold uppercase">Pending</div>
+                    </div>
+                  </div>
+
+                  {/* Resource cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {vcResources.slice(0, 6).map((r: VerifiedResource) => {
+                      const sc = r.verifiedScore;
+                      const scoreColor = sc.score >= 70 ? '#22c55e' : sc.score >= 50 ? '#eab308' : sc.score >= 30 ? '#f97316' : '#ef4444';
+                      return (
+                        <div
+                          key={`${r.namespace}/${r.name}`}
+                          className="bg-gov-bg rounded-xl border border-gov-border p-4 hover:border-gov-border-light transition-all cursor-pointer"
+                          onClick={() => { setPreviousTab('overview'); setActiveTab('verified-catalog'); }}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-semibold text-gov-text truncate max-w-[150px]">{r.title || r.name}</span>
+                            <div
+                              className="w-9 h-9 rounded-full flex items-center justify-center border-2 font-black text-sm tabular-nums"
+                              style={{ borderColor: scoreColor, color: scoreColor, backgroundColor: `${scoreColor}10` }}
+                            >
+                              {sc.score}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-gov-text-3 mb-2">
+                            {r.sourceKind && <span className="font-mono px-1.5 py-0.5 bg-gov-surface rounded">{r.sourceKind}</span>}
+                            <span>{r.namespace}</span>
+                          </div>
+                          <div className="flex gap-1.5 flex-wrap">
+                            <span
+                              className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
+                              style={{ backgroundColor: `${scoreColor}15`, color: scoreColor }}
+                            >
+                              {sc.status}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gov-bg text-gov-text-3 font-semibold">
+                              {sc.checksPassed}/{sc.checksTotal} checks
+                            </span>
+                            {r.toolCount > 0 && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-semibold">
+                                {r.toolCount} tools
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Score Explanation — explains WHY score is 41 / Grade D */}
             <ScoreExplainer

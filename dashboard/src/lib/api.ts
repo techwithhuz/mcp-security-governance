@@ -10,6 +10,9 @@ import {
   MCPServersResponse,
   MCPServerView,
   MCPServerSummary,
+  VerifiedCatalogResponse,
+  VerifiedSummary,
+  VerifiedResource,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
@@ -66,4 +69,18 @@ export async function getMCPServerSummary(): Promise<MCPServerSummary> {
 
 export async function getMCPServerDetail(id: string): Promise<MCPServerView> {
   return fetchAPI(`/api/governance/mcp-servers/detail?id=${encodeURIComponent(id)}`);
+}
+
+// ---------- Verified Catalog (Inventory) ----------
+
+export async function getVerifiedCatalog(): Promise<VerifiedCatalogResponse> {
+  return fetchAPI('/api/governance/inventory/verified');
+}
+
+export async function getVerifiedSummary(): Promise<VerifiedSummary> {
+  return fetchAPI('/api/governance/inventory/summary');
+}
+
+export async function getVerifiedDetail(namespace: string, name: string): Promise<VerifiedResource> {
+  return fetchAPI(`/api/governance/inventory/detail?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`);
 }
