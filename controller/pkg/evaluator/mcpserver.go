@@ -593,17 +593,17 @@ func scoreMCPServer(view *MCPServerView, policy Policy) {
 	}
 
 	// Rate Limit
-	if policy.RequireRateLimit {
-		if !view.HasRateLimit {
-			bd.RateLimit = 0
-		}
+	// Score 100 only if configured, otherwise 0 (feature not deployed)
+	// If not required by policy, it still counts toward weighted score but at 0
+	if !view.HasRateLimit {
+		bd.RateLimit = 0
 	}
 
 	// Prompt Guard
-	if policy.RequirePromptGuard {
-		if !view.HasPromptGuard {
-			bd.PromptGuard = 0
-		}
+	// Score 100 only if configured, otherwise 0 (feature not deployed)
+	// If not required by policy, it still counts toward weighted score but at 0
+	if !view.HasPromptGuard {
+		bd.PromptGuard = 0
 	}
 
 	// Tool Scope - score based on effective tool count (after policy restrictions)

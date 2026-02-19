@@ -139,6 +139,39 @@ spec:
                       type: boolean
                       default: true
                       description: "Whether periodic AI scanning is active. Set to false to only allow manual triggers."
+                scanInterval:
+                  type: string
+                  default: "5m"
+                  description: "Interval between governance scans (e.g. '30s', '5m', '10m', '1h'). Default: '5m'"
+                verifiedCatalogScoring:
+                  type: object
+                  description: "Scoring configuration for Verified Catalog (MCPServerCatalog inventory). All fields optional — omitted values use built-in defaults."
+                  properties:
+                    securityWeight:
+                      type: integer
+                      default: 50
+                      description: "Weight for Security category (transport + deployment checks). Category weights should sum to 100."
+                    trustWeight:
+                      type: integer
+                      default: 30
+                      description: "Weight for Trust category (publisher verification checks). Category weights should sum to 100."
+                    complianceWeight:
+                      type: integer
+                      default: 20
+                      description: "Weight for Compliance category (tool scope + usage checks). Category weights should sum to 100."
+                    verifiedThreshold:
+                      type: integer
+                      default: 70
+                      description: "Score >= this threshold → status 'Verified'."
+                    unverifiedThreshold:
+                      type: integer
+                      default: 50
+                      description: "Score >= this threshold (but < verifiedThreshold) → status 'Unverified'. Below → 'Rejected'."
+                    checkMaxScores:
+                      type: object
+                      description: "Per-check maximum score overrides. Keys are check IDs (PUB-001, PUB-002, PUB-003, SEC-001, SEC-002, DEP-001, DEP-002, DEP-003, TOOL-001, USE-001)."
+                      additionalProperties:
+                        type: integer
             status:
               type: object
               properties:

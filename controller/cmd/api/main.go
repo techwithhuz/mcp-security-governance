@@ -11,9 +11,12 @@ import (
 	"time"
 
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/aiagent"
+	v1alpha1 "github.com/techwithhuz/mcp-security-governance/controller/pkg/apis/governance/v1alpha1"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/discovery"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/evaluator"
+	"github.com/techwithhuz/mcp-security-governance/controller/pkg/inventory"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/watcher"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var (
@@ -45,6 +48,10 @@ var (
 
 	// Resource watcher (reconcile-based scanning)
 	resourceWatcher *watcher.ResourceWatcher
+
+	// Inventory watcher — watches MCPServerCatalog from Agent Registry
+	// and scores each one with a Verified Score (publisher, transport, deployment, tools, usage)
+	inventoryWatcher *inventory.Watcher
 )
 
 func main() {
@@ -120,6 +127,55 @@ func main() {
 		startPollingLoop()
 	}
 
+	// Start inventory watcher — watches MCPServerCatalog from Agent Registry
+	// and scores each resource with a Verified Score on add/update/delete.
+	// No polling needed: the controller reconciliation loop handles it.
+	if discoverer != nil {
+		invPolicy := inventory.ScoringPolicy{
+			MaxToolsWarning:  policy.MaxToolsWarning,
+			MaxToolsCritical: policy.MaxToolsCritical,
+		}
+		// Apply verifiedCatalogScoring overrides from governance policy CR
+		if vcs, ok := policy.VerifiedCatalogScoring.(*v1alpha1.VerifiedCatalogScoringConfig); ok && vcs != nil {
+			if vcs.SecurityWeight > 0 {
+				invPolicy.SecurityWeight = vcs.SecurityWeight
+			}
+			if vcs.TrustWeight > 0 {
+				invPolicy.TrustWeight = vcs.TrustWeight
+			}
+			if vcs.ComplianceWeight > 0 {
+				invPolicy.ComplianceWeight = vcs.ComplianceWeight
+			}
+			if vcs.VerifiedThreshold > 0 {
+				invPolicy.VerifiedThreshold = vcs.VerifiedThreshold
+			}
+			if vcs.UnverifiedThreshold > 0 {
+				invPolicy.UnverifiedThreshold = vcs.UnverifiedThreshold
+			}
+			if len(vcs.CheckMaxScores) > 0 {
+				invPolicy.CheckMaxScores = vcs.CheckMaxScores
+			}
+		}
+		iw, err := inventory.NewWatcher(inventory.WatcherConfig{
+			DynamicClient: discoverer.DynamicClient(),
+			Policy: invPolicy,
+			Namespace: "", // watch all namespaces
+			OnChange: func() {
+				// Log when inventory verified scores change
+				log.Printf("[inventory] Verified resources updated — scores reconciled")
+			},
+		})
+		if err != nil {
+			log.Printf("[governance] WARNING: Failed to create inventory watcher: %v", err)
+		} else {
+			inventoryWatcher = iw
+			log.Printf("[governance] Inventory watcher enabled — scoring MCPServerCatalog resources on change")
+			go inventoryWatcher.Start(context.Background())
+		}
+	} else {
+		log.Printf("[governance] No K8s connection — inventory watcher disabled")
+	}
+
 	// API routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", handleHealth)
@@ -141,6 +197,10 @@ func main() {
 	// Scan management endpoints
 	mux.HandleFunc("/api/governance/scan/refresh", handleRefreshScan)
 	mux.HandleFunc("/api/governance/scan/status", handleScanStatus)
+	// Inventory verified score endpoints
+	mux.HandleFunc("/api/governance/inventory/verified", handleInventoryVerified)
+	mux.HandleFunc("/api/governance/inventory/summary", handleInventorySummary)
+	mux.HandleFunc("/api/governance/inventory/detail", handleInventoryDetail)
 
 	// CORS middleware
 	handler := corsMiddleware(mux)
@@ -212,6 +272,23 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 			"reconcileCount": stats.ReconcileCount,
 			"lastEvent":      stats.LastEvent.Format(time.RFC3339),
 			"lastReconcile":  stats.LastReconcile.Format(time.RFC3339),
+		}
+	}
+
+	// Include inventory watcher stats
+	if inventoryWatcher != nil {
+		iStats := inventoryWatcher.Stats()
+		iSummary := inventoryWatcher.GetSummary()
+		resp["inventory"] = map[string]interface{}{
+			"enabled":        true,
+			"resourceCount":  iStats.ResourceCount,
+			"eventCount":     iStats.EventCount,
+			"reconcileCount": iStats.ReconcileCount,
+			"lastEvent":      iStats.LastEvent.Format(time.RFC3339),
+			"lastReconcile":  iStats.LastReconcile.Format(time.RFC3339),
+			"averageScore":   iSummary.AverageScore,
+			"verifiedCount":  iSummary.VerifiedCount,
+			"warningCount":   iSummary.WarningCount,
 		}
 	}
 
@@ -717,6 +794,46 @@ func updateEvaluationStatus(policyName string, result *evaluator.EvaluationResul
 	if discoverer == nil || policyName == "" || result == nil {
 		return
 	}
+
+	// Populate verified catalog scores from inventory watcher if available
+	if inventoryWatcher != nil {
+		verifiedResources := inventoryWatcher.GetResources()
+		verifiedScores := make([]v1alpha1.VerifiedCatalogScore, 0, len(verifiedResources))
+
+		for _, vr := range verifiedResources {
+			score := v1alpha1.VerifiedCatalogScore{
+				CatalogName:     vr.CatalogName,
+				Namespace:       vr.Namespace,
+				ResourceVersion: vr.ResourceVersion,
+				Status:          vr.VerifiedScore.Status,
+				CompositeScore:  vr.VerifiedScore.Score,
+				SecurityScore:   vr.VerifiedScore.SecurityScore,
+				TrustScore:      vr.VerifiedScore.TrustScore,
+				ComplianceScore: vr.VerifiedScore.ComplianceScore,
+			}
+
+			// Convert VerifiedCheck to CatalogScoringCheck
+			for _, check := range vr.VerifiedScore.Checks {
+				score.Checks = append(score.Checks, v1alpha1.CatalogScoringCheck{
+					ID:        check.ID,
+					Name:      check.Name,
+					Points:    check.Score,
+					MaxPoints: check.MaxScore,
+				})
+			}
+
+			// Set LastScored timestamp
+			if !vr.LastScored.IsZero() {
+				metaTime := metav1.NewTime(vr.LastScored)
+				score.LastScored = &metaTime
+			}
+
+			verifiedScores = append(verifiedScores, score)
+		}
+
+		result.VerifiedCatalogScores = verifiedScores
+	}
+
 	if err := discoverer.UpdateEvaluationStatus(context.Background(), policyName, result); err != nil {
 		log.Printf("[governance] WARNING: Failed to update evaluation status: %v", err)
 	}
@@ -1285,4 +1402,69 @@ func discoverClusterState() *evaluator.ClusterState {
 func init() {
 	// Suppress unused import warning
 	_ = fmt.Sprintf
+}
+
+// ---------- Inventory Verified Score Endpoints ----------
+
+// handleInventoryVerified returns all MCPServerCatalog entries with their Verified Scores.
+func handleInventoryVerified(w http.ResponseWriter, r *http.Request) {
+	if inventoryWatcher == nil {
+		jsonResponse(w, map[string]interface{}{
+			"enabled":   false,
+			"message":   "Inventory watcher is not running — no Kubernetes connection or MCPServerCatalog CRD not available",
+			"resources": []interface{}{},
+			"summary":   inventory.VerifiedSummary{},
+		})
+		return
+	}
+
+	resources := inventoryWatcher.GetResources()
+	summary := inventoryWatcher.GetSummary()
+
+	jsonResponse(w, map[string]interface{}{
+		"enabled":   true,
+		"resources": resources,
+		"summary":   summary,
+		"total":     len(resources),
+	})
+}
+
+// handleInventorySummary returns only the cluster-level verified summary.
+func handleInventorySummary(w http.ResponseWriter, r *http.Request) {
+	if inventoryWatcher == nil {
+		jsonResponse(w, map[string]interface{}{
+			"enabled": false,
+			"summary": inventory.VerifiedSummary{},
+		})
+		return
+	}
+
+	summary := inventoryWatcher.GetSummary()
+	jsonResponse(w, map[string]interface{}{
+		"enabled": true,
+		"summary": summary,
+	})
+}
+
+// handleInventoryDetail returns detailed verified score for a single MCPServerCatalog.
+func handleInventoryDetail(w http.ResponseWriter, r *http.Request) {
+	if inventoryWatcher == nil {
+		http.Error(w, "Inventory watcher not running", http.StatusServiceUnavailable)
+		return
+	}
+
+	namespace := r.URL.Query().Get("namespace")
+	name := r.URL.Query().Get("name")
+	if namespace == "" || name == "" {
+		http.Error(w, "Missing 'namespace' and 'name' query parameters", http.StatusBadRequest)
+		return
+	}
+
+	res, found := inventoryWatcher.GetResource(namespace, name)
+	if !found {
+		http.Error(w, fmt.Sprintf("MCPServerCatalog %s/%s not found in verified resources", namespace, name), http.StatusNotFound)
+		return
+	}
+
+	jsonResponse(w, res)
 }

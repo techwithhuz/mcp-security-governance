@@ -38,6 +38,11 @@ rules:
       - mcpservers
       - remotemcpservers
     verbs: ["get", "list", "watch"]
+  # Agent Registry inventory CRDs (MCPServerCatalog for Verified Score)
+  - apiGroups: ["agentregistry.dev"]
+    resources:
+      - mcpservercatalogs
+    verbs: ["get", "list", "watch"]
   # Governance CRDs
   - apiGroups: ["governance.mcp.io"]
     resources:

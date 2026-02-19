@@ -235,4 +235,4 @@ spec:
                 - CreditCard
                 - Ssn
                 - Email
-                - PhoneNumber
+                - ApiKey

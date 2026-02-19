@@ -186,3 +186,121 @@ export interface MCPServersResponse {
   servers: MCPServerView[];
   summary: MCPServerSummary;
 }
+
+// ---------- Verified Catalog Types (Inventory) ----------
+
+export interface VerifiedCheck {
+  id: string;
+  name: string;
+  category: string;
+  passed: boolean;
+  score: number;
+  maxScore: number;
+  description: string;
+  detail: string;
+}
+
+export interface VerifiedFinding {
+  severity: 'Critical' | 'High' | 'Medium' | 'Low';
+  category: string;
+  title: string;
+  description: string;
+  remediation: string;
+}
+
+export interface VerifiedScore {
+  score: number;
+  grade: string;
+  status: 'Verified' | 'Unverified' | 'Rejected' | 'Pending';
+  checks: VerifiedCheck[];
+  findings: VerifiedFinding[];
+  checksPassed: number;
+  checksTotal: number;
+  lastEvaluated: string;
+
+  // Composite category scores (0–100)
+  securityScore: number;
+  trustScore: number;
+  complianceScore: number;
+
+  // Publisher trust sub-scores
+  orgScore: number;
+  publisherScore: number;
+  verifiedOrg?: string;
+  verifiedPublisher?: string;
+
+  // Human-readable summary
+  reason: string;
+
+  // Flat convenience fields (set during transformation)
+  resourceRef?: string;
+  catalogName?: string;
+  namespace?: string;
+  mcpServerIDs?: string[];
+  scoredAt?: string;
+  toolNames?: string[];
+  usedByAgents?: AgentUsage[];
+}
+
+export interface AgentUsage {
+  name: string;
+  namespace: string;
+  toolNames?: string[];
+}
+
+export interface VerifiedResource {
+  name: string;
+  namespace: string;
+  catalogName: string;
+  title: string;
+  description: string;
+  version: string;
+  sourceKind: string;
+  sourceName: string;
+  sourceNamespace: string;
+  environment: string;
+  cluster: string;
+  published: boolean;
+  deploymentReady: boolean;
+  managementType: string;
+  transport?: string;
+  packageImage?: string;
+  remoteURL?: string;
+  toolNames?: string[];
+  toolCount: number;
+  usedByAgents?: AgentUsage[];
+  verifiedScore: VerifiedScore;
+  lastScored: string;
+  resourceVersion: string;
+}
+
+export interface VerifiedSummary {
+  totalCatalogs: number;
+  totalScored: number;
+  verifiedCount: number;
+  unverifiedCount: number;
+  rejectedCount: number;
+  pendingCount: number;
+  warningCount: number;
+  criticalCount: number;
+  averageScore: number;
+  totalTools: number;
+  totalAgentUsages: number;
+  lastReconcile: string;
+}
+
+export interface VerifiedCatalogResponse {
+  resources: VerifiedResource[];
+  summary: VerifiedSummary;
+}
+
+// Shape expected by VerifiedCatalog component
+export interface VerifiedInventory {
+  items: VerifiedScore[];
+  averageScore: number;
+  totalScored: number;
+  totalVerified: number;
+  totalUnverified: number;
+  totalRejected: number;
+  totalPending: number;
+}

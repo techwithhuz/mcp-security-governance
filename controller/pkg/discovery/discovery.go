@@ -19,6 +19,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/evaluator"
+
+	v1alpha1 "github.com/techwithhuz/mcp-security-governance/controller/pkg/apis/governance/v1alpha1"
 )
 
 // K8sDiscoverer discovers resources from a real Kubernetes cluster
@@ -910,6 +912,35 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 		policy.ExcludeNamespaces = evaluator.DefaultExcludeNamespaces()
 	}
 
+	// Parse verifiedCatalogScoring configuration
+	if vcsMap, ok := spec["verifiedCatalogScoring"].(map[string]interface{}); ok {
+		vcs := &v1alpha1.VerifiedCatalogScoringConfig{}
+		if val, ok := vcsMap["securityWeight"].(int64); ok {
+			vcs.SecurityWeight = int(val)
+		}
+		if val, ok := vcsMap["trustWeight"].(int64); ok {
+			vcs.TrustWeight = int(val)
+		}
+		if val, ok := vcsMap["complianceWeight"].(int64); ok {
+			vcs.ComplianceWeight = int(val)
+		}
+		if val, ok := vcsMap["verifiedThreshold"].(int64); ok {
+			vcs.VerifiedThreshold = int(val)
+		}
+		if val, ok := vcsMap["unverifiedThreshold"].(int64); ok {
+			vcs.UnverifiedThreshold = int(val)
+		}
+		if checksMap, ok := vcsMap["checkMaxScores"].(map[string]interface{}); ok {
+			vcs.CheckMaxScores = make(map[string]int)
+			for k, v := range checksMap {
+				if val, ok := v.(int64); ok {
+					vcs.CheckMaxScores[k] = int(val)
+				}
+			}
+		}
+		policy.VerifiedCatalogScoring = vcs
+	}
+
 	log.Printf("[discovery] Loaded MCPGovernancePolicy: %s/%s (targetNS=%v, excludeNS=%v)",
 		policyObj.GetNamespace(), policyObj.GetName(), policy.TargetNamespaces, policy.ExcludeNamespaces)
 	return policy
@@ -1066,6 +1097,78 @@ func (d *K8sDiscoverer) UpdateEvaluationStatus(ctx context.Context, policyName s
 			})
 		}
 
+		// Build verifiedCatalogScores
+		verifiedCatalogScores := make([]interface{}, 0)
+		if result.VerifiedCatalogScores != nil {
+			for _, vcs := range result.VerifiedCatalogScores {
+				checks := make([]interface{}, 0)
+				if vcs.Checks != nil {
+					for _, check := range vcs.Checks {
+						checks = append(checks, map[string]interface{}{
+							"id":       check.ID,
+							"name":     check.Name,
+							"points":   int64(check.Points),
+							"maxPoints": int64(check.MaxPoints),
+						})
+					}
+				}
+				verifiedCatalogScores = append(verifiedCatalogScores, map[string]interface{}{
+					"catalogName":  vcs.CatalogName,
+					"namespace":    vcs.Namespace,
+					"resourceVersion": vcs.ResourceVersion,
+					"status":       vcs.Status,
+					"compositeScore": int64(vcs.CompositeScore),
+					"securityScore": int64(vcs.SecurityScore),
+					"trustScore":   int64(vcs.TrustScore),
+					"complianceScore": int64(vcs.ComplianceScore),
+					"checks":       checks,
+					"lastScored":   vcs.LastScored.Format(time.RFC3339),
+				})
+			}
+		}
+
+		// Build mcpServerScores
+		mcpServerScores := make([]interface{}, 0)
+		if result.MCPServerViews != nil {
+			for _, msv := range result.MCPServerViews {
+				scoreBreakdownMap := map[string]interface{}{
+					"gatewayRouting": int64(msv.ScoreBreakdown.GatewayRouting),
+					"authentication": int64(msv.ScoreBreakdown.Authentication),
+					"authorization":  int64(msv.ScoreBreakdown.Authorization),
+					"tls":            int64(msv.ScoreBreakdown.TLS),
+					"cors":           int64(msv.ScoreBreakdown.CORS),
+					"rateLimit":      int64(msv.ScoreBreakdown.RateLimit),
+					"promptGuard":    int64(msv.ScoreBreakdown.PromptGuard),
+					"toolScope":      int64(msv.ScoreBreakdown.ToolScope),
+				}
+				relatedResources := map[string]interface{}{
+					"gateways":  int64(len(msv.RelatedGateways)),
+					"backends":  int64(len(msv.RelatedBackends)),
+					"policies":  int64(len(msv.RelatedPolicies)),
+					"routes":    int64(len(msv.RelatedRoutes)),
+				}
+				criticalFindings := 0
+				for _, f := range msv.Findings {
+					if f.Severity == "Critical" || f.Severity == "Failing" {
+						criticalFindings++
+					}
+				}
+				mcpServerScores = append(mcpServerScores, map[string]interface{}{
+					"name":               msv.Name,
+					"namespace":          msv.Namespace,
+					"source":             msv.Source,
+					"status":             msv.Status,
+					"score":              int64(msv.Score),
+					"scoreBreakdown":     scoreBreakdownMap,
+					"toolCount":          int64(msv.ToolCount),
+					"effectiveToolCount": int64(msv.EffectiveToolCount),
+					"relatedResources":   relatedResources,
+					"criticalFindings":   int64(criticalFindings),
+					"lastEvaluated":      result.Timestamp.Format(time.RFC3339),
+				})
+			}
+		}
+
 		// Set the status
 		status := map[string]interface{}{
 			"score":              int64(result.Score),
@@ -1074,6 +1177,8 @@ func (d *K8sDiscoverer) UpdateEvaluationStatus(ctx context.Context, policyName s
 			"resourceSummary":    resourceSummary,
 			"scoreBreakdown":     scoreBreakdown,
 			"namespaceScores":    nsScores,
+			"verifiedCatalogScores": verifiedCatalogScores,
+			"mcpServerScores":    mcpServerScores,
 			"lastEvaluationTime": now,
 			"findingsCount":      int64(len(result.Findings)),
 		}

@@ -44,6 +44,26 @@ type MCPGovernancePolicySpec struct {
 	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
 	// ExcludeNamespaces is the list of namespaces to exclude from monitoring
 	ExcludeNamespaces []string `json:"excludeNamespaces,omitempty"`
+	// VerifiedCatalogScoring configures scoring thresholds, category weights, and per-check max scores
+	// for the Verified Catalog (MCPServerCatalog inventory) scoring model.
+	VerifiedCatalogScoring *VerifiedCatalogScoringConfig `json:"verifiedCatalogScoring,omitempty"`
+}
+
+// VerifiedCatalogScoringConfig allows users to customise the Verified Catalog scoring model
+// via the MCPGovernancePolicy CRD. All fields are optional — omitted values use built-in defaults.
+type VerifiedCatalogScoringConfig struct {
+	// Category weights (should sum to 100). Controls how the final composite score is computed.
+	SecurityWeight   int `json:"securityWeight,omitempty"`   // default: 50 — weight for transport + deployment
+	TrustWeight      int `json:"trustWeight,omitempty"`      // default: 30 — weight for publisher verification
+	ComplianceWeight int `json:"complianceWeight,omitempty"` // default: 20 — weight for tool scope + usage
+
+	// Status thresholds — score boundaries for Verified / Unverified / Rejected.
+	VerifiedThreshold   int `json:"verifiedThreshold,omitempty"`   // score >= this → "Verified" (default: 70)
+	UnverifiedThreshold int `json:"unverifiedThreshold,omitempty"` // score >= this → "Unverified" (default: 50)
+
+	// Per-check max score overrides. Keys are check IDs (e.g. "PUB-001", "SEC-001").
+	// Each value is the maximum points awarded for that check.
+	CheckMaxScores map[string]int `json:"checkMaxScores,omitempty"`
 }
 
 type SeverityPenalties struct {
@@ -123,13 +143,16 @@ type TargetRef struct {
 }
 
 type GovernanceEvaluationStatus struct {
-	Score              int               `json:"score"`
-	Phase              string            `json:"phase,omitempty"`
-	Findings           []Finding         `json:"findings,omitempty"`
-	ResourceSummary    ResourceSummary   `json:"resourceSummary,omitempty"`
-	LastEvaluationTime *metav1.Time      `json:"lastEvaluationTime,omitempty"`
-	ScoreBreakdown     ScoreBreakdown    `json:"scoreBreakdown,omitempty"`
-	NamespaceScores    []NamespaceScore  `json:"namespaceScores,omitempty"`
+	Score                   int                      `json:"score"`
+	Phase                   string                   `json:"phase,omitempty"`
+	Findings                []Finding                `json:"findings,omitempty"`
+	ResourceSummary         ResourceSummary          `json:"resourceSummary,omitempty"`
+	LastEvaluationTime      *metav1.Time             `json:"lastEvaluationTime,omitempty"`
+	ScoreBreakdown          ScoreBreakdown           `json:"scoreBreakdown,omitempty"`
+	NamespaceScores         []NamespaceScore         `json:"namespaceScores,omitempty"`
+	VerifiedCatalogScores   []VerifiedCatalogScore   `json:"verifiedCatalogScores,omitempty"`
+	MCPServerScores         []MCPServerScore         `json:"mcpServerScores,omitempty"`
+	FindingsCount           int                      `json:"findingsCount,omitempty"`
 }
 
 type Finding struct {
@@ -177,6 +200,63 @@ type NamespaceScore struct {
 	Namespace string `json:"namespace"`
 	Score     int    `json:"score"`
 	Findings  int    `json:"findings"`
+}
+
+// VerifiedCatalogScore stores the governance score for an MCPServerCatalog resource
+type VerifiedCatalogScore struct {
+	CatalogName      string                    `json:"catalogName"`
+	Namespace        string                    `json:"namespace"`
+	ResourceVersion  string                    `json:"resourceVersion,omitempty"`
+	Status           string                    `json:"status"` // "Verified", "Unverified", "Rejected", "Pending"
+	CompositeScore   int                       `json:"compositeScore"`
+	SecurityScore    int                       `json:"securityScore"`    // 0-100 (transport + deployment)
+	TrustScore       int                       `json:"trustScore"`       // 0-100 (publisher verification)
+	ComplianceScore  int                       `json:"complianceScore"`  // 0-100 (tool scope + usage)
+	Checks           []CatalogScoringCheck     `json:"checks,omitempty"`
+	LastScored       *metav1.Time              `json:"lastScored,omitempty"`
+}
+
+// CatalogScoringCheck represents a single governance check for Verified Catalog
+type CatalogScoringCheck struct {
+	ID        string `json:"id"`   // e.g., "PUB-001", "SEC-001", "TOOL-001"
+	Name      string `json:"name"`
+	Points    int    `json:"points"`    // Points earned
+	MaxPoints int    `json:"maxPoints"` // Maximum possible points
+}
+
+// MCPServerScore stores the governance score for an MCP server (KagentMCPServer, RemoteMCPServer, etc.)
+type MCPServerScore struct {
+	Name              string                    `json:"name"`
+	Namespace         string                    `json:"namespace"`
+	Source            string                    `json:"source"` // "KagentMCPServer", "RemoteMCPServer", "AgentgatewayBackendTarget"
+	Status            string                    `json:"status"` // "compliant", "warning", "failing", "critical"
+	Score             int                       `json:"score"`
+	ScoreBreakdown    MCPServerScoreBreakdown   `json:"scoreBreakdown,omitempty"`
+	ToolCount         int                       `json:"toolCount"`
+	EffectiveToolCount int                      `json:"effectiveToolCount"`
+	RelatedResources  RelatedResourceSummary    `json:"relatedResources,omitempty"`
+	CriticalFindings  int                       `json:"criticalFindings"`
+	LastEvaluated     *metav1.Time              `json:"lastEvaluated,omitempty"`
+}
+
+// MCPServerScoreBreakdown breaks down the score by governance control
+type MCPServerScoreBreakdown struct {
+	GatewayRouting int `json:"gatewayRouting"`
+	Authentication int `json:"authentication"`
+	Authorization  int `json:"authorization"`
+	TLS            int `json:"tls"`
+	CORS           int `json:"cors"`
+	RateLimit      int `json:"rateLimit"`
+	PromptGuard    int `json:"promptGuard"`
+	ToolScope      int `json:"toolScope"`
+}
+
+// RelatedResourceSummary summarizes related resources for an MCP server
+type RelatedResourceSummary struct {
+	Gateways int `json:"gateways"`
+	Backends int `json:"backends"`
+	Policies int `json:"policies"`
+	Routes   int `json:"routes"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

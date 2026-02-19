@@ -3,6 +3,8 @@ package evaluator
 import (
 	"fmt"
 	"time"
+
+	v1alpha1 "github.com/techwithhuz/mcp-security-governance/controller/pkg/apis/governance/v1alpha1"
 )
 
 // Severity levels for governance findings
@@ -251,8 +253,9 @@ type EvaluationResult struct {
 	NamespaceScores []NamespaceScore
 	Timestamp       time.Time
 	// MCP-server-centric views
-	MCPServerViews   []MCPServerView  `json:"mcpServerViews"`
-	MCPServerSummary MCPServerSummary `json:"mcpServerSummary"`
+	MCPServerViews       []MCPServerView             `json:"mcpServerViews"`
+	MCPServerSummary     MCPServerSummary            `json:"mcpServerSummary"`
+	VerifiedCatalogScores []v1alpha1.VerifiedCatalogScore `json:"verifiedCatalogScores,omitempty"`
 }
 
 type ScoreBreakdown struct {
@@ -318,6 +321,7 @@ type Policy struct {
 	ExcludeNamespaces   []string // Namespaces to exclude from evaluation (e.g. kube-system)
 	Weights             ScoringWeights
 	SeverityPenalties   SeverityPenalties
+	VerifiedCatalogScoring interface{} // *v1alpha1.VerifiedCatalogScoringConfig (stored as interface to avoid circular imports)
 }
 
 // SeverityPenalties defines how many points are deducted per finding severity

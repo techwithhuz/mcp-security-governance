@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import {
   Server, Shield, ShieldAlert, ShieldCheck, ShieldX,
-  ChevronRight, Route, Network, Plug
+  ChevronRight, Route, Network, Plug, Search, X
 } from 'lucide-react';
 import type { MCPServerView, MCPServerSummary } from '@/lib/types';
 
@@ -29,6 +29,7 @@ const sourceLabels: Record<string, { label: string; icon: typeof Plug }> = {
 
 export default function MCPServerList({ servers, summary, onSelectServer }: MCPServerListProps) {
   const [filter, setFilter] = useState<'all' | 'critical' | 'warning' | 'compliant'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const filtered = servers.filter(s => {
     if (filter === 'all') return true;
@@ -36,6 +37,14 @@ export default function MCPServerList({ servers, summary, onSelectServer }: MCPS
     if (filter === 'warning') return s.status === 'warning';
     if (filter === 'compliant') return s.status === 'compliant';
     return true;
+  }).filter(s => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      s.name.toLowerCase().includes(query) ||
+      s.namespace.toLowerCase().includes(query) ||
+      s.source.toLowerCase().includes(query)
+    );
   });
 
   // Sort: critical first, then failing, then warning, then compliant
@@ -108,25 +117,49 @@ export default function MCPServerList({ servers, summary, onSelectServer }: MCPS
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-2">
-        {([
-          { id: 'all' as const, label: `All (${servers.length})` },
-          { id: 'critical' as const, label: `Critical (${criticalCount})` },
-          { id: 'warning' as const, label: `Warning (${warningCount})` },
-          { id: 'compliant' as const, label: `Compliant (${compliantCount})` },
-        ]).map(f => (
-          <button
-            key={f.id}
-            onClick={() => setFilter(f.id)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              filter === f.id
-                ? 'bg-gov-accent/15 text-blue-400 border border-blue-500/30'
-                : 'bg-gov-surface text-gov-text-3 hover:text-gov-text-2 hover:bg-gov-surface/80 border border-gov-border'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="space-y-4">
+        {/* Search Bar */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gov-text-3" />
+          <input
+            type="text"
+            placeholder="Search MCP servers by name, namespace, or source..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-10 py-2.5 bg-gov-surface border border-gov-border rounded-lg text-sm text-gov-text placeholder-gov-text-3 focus:outline-none focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 transition-all"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gov-text-3 hover:text-gov-text transition-colors"
+              title="Clear search"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Filter tabs */}
+        <div className="flex gap-2">
+          {([
+            { id: 'all' as const, label: `All (${servers.length})` },
+            { id: 'critical' as const, label: `Critical (${criticalCount})` },
+            { id: 'warning' as const, label: `Warning (${warningCount})` },
+            { id: 'compliant' as const, label: `Compliant (${compliantCount})` },
+          ]).map(f => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                filter === f.id
+                  ? 'bg-gov-accent/15 text-blue-400 border border-blue-500/30'
+                  : 'bg-gov-surface text-gov-text-3 hover:text-gov-text-2 hover:bg-gov-surface/80 border border-gov-border'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Server list */}

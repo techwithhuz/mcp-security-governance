@@ -136,6 +136,33 @@ governancePolicy:
       scanInterval: "5m"
       # -- Whether periodic AI scanning is active (set false to only allow manual triggers)
       scanEnabled: true
+    # -- Verified Catalog scoring configuration for MCPServerCatalog inventory.
+    # -- Controls thresholds, category weights, and per-check max scores.
+    verifiedCatalogScoring:
+      # -- Weight for Security category (transport + deployment checks). Weights should sum to 100.
+      securityWeight: 50
+      # -- Weight for Trust category (publisher verification checks).
+      trustWeight: 30
+      # -- Weight for Compliance category (tool scope + usage checks).
+      complianceWeight: 20
+      # -- Score >= this threshold → status "Verified"
+      verifiedThreshold: 70
+      # -- Score >= this threshold (but < verifiedThreshold) → "Unverified". Below → "Rejected"
+      unverifiedThreshold: 50
+      # -- Per-check maximum score overrides. Keys are check IDs.
+      # -- Default scores: PUB-001:10, PUB-002:10, PUB-003:10, SEC-001:15, SEC-002:10,
+      # --   DEP-001:5, DEP-002:10, DEP-003:5, TOOL-001:15, USE-001:10 (total: 100)
+      checkMaxScores:
+        PUB-001: 10
+        PUB-002: 10
+        PUB-003: 10
+        SEC-001: 15
+        SEC-002: 10
+        DEP-001: 5
+        DEP-002: 10
+        DEP-003: 5
+        TOOL-001: 15
+        USE-001: 10
 
 # -- Image pull secrets (for private registries)
 imagePullSecrets: []
