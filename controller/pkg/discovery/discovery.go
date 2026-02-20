@@ -213,7 +213,7 @@ func (d *K8sDiscoverer) discoverHTTPRoutes(ctx context.Context) []evaluator.HTTP
 				hr.ParentGatewayNamespace = ns
 			}
 
-			// Get backend refs
+			// Get backend refs and paths from rules
 			rules, _ := getNestedSlice(spec, "rules")
 			for _, r := range rules {
 				rm, ok := r.(map[string]interface{})
@@ -228,6 +228,21 @@ func (d *K8sDiscoverer) discoverHTTPRoutes(ctx context.Context) []evaluator.HTTP
 					}
 					name, _ := getNestedString(bm, "name")
 					hr.BackendRefs = append(hr.BackendRefs, name)
+				}
+
+				// Extract path from matches
+				matches, _ := getNestedSlice(rm, "matches")
+				for _, m := range matches {
+					mm, ok := m.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					pathMatch, ok := mm["path"].(map[string]interface{})
+					if ok {
+						if pathValue, ok := pathMatch["value"].(string); ok {
+							hr.Paths = append(hr.Paths, pathValue)
+						}
+					}
 				}
 
 				// Check for CORS filter
@@ -467,6 +482,36 @@ func (d *K8sDiscoverer) discoverAgentgatewayPolicies(ctx context.Context) []eval
 				}
 			}
 
+			// Parse backend section (MCP-specific backend authorization)
+			backend, _ := getNestedMap(spec, "backend")
+			if backend != nil {
+				// MCP backend authorization + extract allowed tools from CEL expressions
+				mcp, _ := getNestedMap(backend, "mcp")
+				if mcp != nil {
+					authz, _ := getNestedMap(mcp, "authorization")
+					if authz != nil {
+						p.HasRBAC = true
+						action, _ := getNestedString(authz, "action")
+						if action == "Allow" {
+							policy, _ := getNestedMap(authz, "policy")
+							if policy != nil {
+								exprs, _ := getNestedSlice(policy, "matchExpressions")
+								for _, expr := range exprs {
+									exprStr, ok := expr.(string)
+									if !ok {
+										continue
+									}
+									// Extract tool names from CEL like:
+									// "mcp.tool.name in ['tool1', 'tool2', ...]"
+									tools := extractToolNamesFromCEL(exprStr)
+									p.AllowedTools = append(p.AllowedTools, tools...)
+								}
+							}
+						}
+					}
+				}
+			}
+
 			// Fallback: check default section (old format)
 			defaults, _ := getNestedMap(spec, "default")
 			if defaults != nil {
@@ -502,9 +547,9 @@ func (d *K8sDiscoverer) discoverAgentgatewayPolicies(ctx context.Context) []eval
 			}
 
 			// Check backend.ai.promptGuard (agentgateway CRD format)
-			backend, _ := getNestedMap(spec, "backend")
-			if backend != nil {
-				ai, _ := getNestedMap(backend, "ai")
+			backendAI, _ := getNestedMap(spec, "backend")
+			if backendAI != nil {
+				ai, _ := getNestedMap(backendAI, "ai")
 				if ai != nil {
 					pg, _ := getNestedMap(ai, "promptGuard")
 					if pg != nil {

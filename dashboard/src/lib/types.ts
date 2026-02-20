@@ -144,6 +144,9 @@ export interface MCPServerView {
   effectiveToolCount: number;
   effectiveToolNames?: string[];
   hasToolRestriction: boolean;
+  toolsByRoute?: Record<string, string[]>; // Route name -> allowed tools
+  toolsByPolicy?: Record<string, Record<string, string[]>>; // Route name -> Policy name -> allowed tools
+  pathTools?: Record<string, string[]>; // Path label (/ro, /rw) -> allowed tools
 
   relatedBackends: RelatedResource[];
   relatedPolicies: RelatedResource[];

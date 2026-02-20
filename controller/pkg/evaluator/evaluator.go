@@ -187,6 +187,7 @@ type HTTPRouteResource struct {
 	ParentGatewayNamespace string // defaults to route's own namespace if empty
 	BackendRefs            []string
 	HasCORSFilter          bool
+	Paths                  []string // Extracted path values from rules (e.g., ["/ro", "/rw"])
 }
 
 // ---- kagent resource representations ----

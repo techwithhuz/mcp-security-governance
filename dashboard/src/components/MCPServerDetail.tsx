@@ -221,22 +221,72 @@ export default function MCPServerDetail({ server, onBack }: MCPServerDetailProps
               )}
             </span>
           </h3>
-          <div className="bg-gov-surface rounded-xl border border-gov-border p-4">
-            {server.hasToolRestriction && server.effectiveToolNames && server.effectiveToolNames.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {server.effectiveToolNames.map((tool, i) => (
-                  <span key={i} className="px-2.5 py-1 bg-green-500/10 rounded-lg text-xs font-mono text-green-400 border border-green-500/20">
-                    {tool}
+          <div className="space-y-3">
+            {/* Show tools grouped by path if available */}
+            {server.hasToolRestriction && server.pathTools && Object.keys(server.pathTools).length > 0 ? (
+              Object.entries(server.pathTools).map(([path, tools]) => (
+                <div key={path} className="bg-gov-surface rounded-xl border border-gov-border overflow-hidden">
+                  {/* Header with path and count */}
+                  <div className="px-4 py-3 border-b border-gov-border flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-gov-text-2 uppercase tracking-wider">Path:</span>
+                      <span className="px-3 py-1 bg-blue-500/10 rounded-lg text-xs font-bold text-blue-400 border border-blue-500/20 font-mono">
+                        {path}
+                      </span>
+                    </div>
+                    <span className="text-xs font-semibold text-gov-text-3">
+                      {tools.length} {tools.length === 1 ? 'tool' : 'tools'}
+                    </span>
+                  </div>
+                  {/* Tools grid */}
+                  <div className="p-4">
+                    <div className="flex flex-wrap gap-2">
+                      {tools.map((tool, i) => (
+                        <span key={i} className="px-2.5 py-1.5 bg-green-500/10 rounded-lg text-xs font-mono text-green-400 border border-green-500/20 whitespace-nowrap">
+                          {tool}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : server.hasToolRestriction && server.effectiveToolNames && server.effectiveToolNames.length > 0 ? (
+              /* Fallback to effectiveToolNames if pathTools is not available */
+              <div className="bg-gov-surface rounded-xl border border-gov-border overflow-hidden">
+                <div className="px-4 py-3 border-b border-gov-border flex items-center justify-between">
+                  <span className="text-xs font-bold text-gov-text-2 uppercase tracking-wider">Allowed Tools</span>
+                  <span className="text-xs font-semibold text-gov-text-3">
+                    {server.effectiveToolNames.length} {server.effectiveToolNames.length === 1 ? 'tool' : 'tools'}
                   </span>
-                ))}
+                </div>
+                <div className="p-4">
+                  <div className="flex flex-wrap gap-2">
+                    {server.effectiveToolNames.map((tool, i) => (
+                      <span key={i} className="px-2.5 py-1.5 bg-green-500/10 rounded-lg text-xs font-mono text-green-400 border border-green-500/20 whitespace-nowrap">
+                        {tool}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {server.toolNames.map((tool, i) => (
-                  <span key={i} className="px-2.5 py-1 bg-gov-bg rounded-lg text-xs font-mono text-gov-text-2 border border-gov-border">
-                    {tool}
+              /* Show all discovered tools if no restriction */
+              <div className="bg-gov-surface rounded-xl border border-gov-border overflow-hidden">
+                <div className="px-4 py-3 border-b border-gov-border flex items-center justify-between">
+                  <span className="text-xs font-bold text-gov-text-2 uppercase tracking-wider">Discovered Tools</span>
+                  <span className="text-xs font-semibold text-gov-text-3">
+                    {server.toolNames.length} {server.toolNames.length === 1 ? 'tool' : 'tools'}
                   </span>
-                ))}
+                </div>
+                <div className="p-4">
+                  <div className="flex flex-wrap gap-2">
+                    {server.toolNames.map((tool, i) => (
+                      <span key={i} className="px-2.5 py-1.5 bg-gov-bg rounded-lg text-xs font-mono text-gov-text-2 border border-gov-border whitespace-nowrap">
+                        {tool}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </div>

@@ -22,9 +22,12 @@ type MCPServerView struct {
 	ToolNames []string `json:"toolNames"`
 
 	// Effective tools (after policy enforcement)
-	EffectiveToolCount int      `json:"effectiveToolCount"`
-	EffectiveToolNames []string `json:"effectiveToolNames,omitempty"`
-	HasToolRestriction bool     `json:"hasToolRestriction"`
+	EffectiveToolCount int                         `json:"effectiveToolCount"`
+	EffectiveToolNames []string                    `json:"effectiveToolNames,omitempty"`
+	HasToolRestriction bool                        `json:"hasToolRestriction"`
+	ToolsByRoute       map[string][]string         `json:"toolsByRoute,omitempty"` // Route name -> allowed tools for that route
+	ToolsByPolicy      map[string]map[string][]string `json:"toolsByPolicy,omitempty"` // Route name -> Policy name -> allowed tools
+	PathTools          map[string][]string         `json:"pathTools,omitempty"` // Path label (e.g., "/ro", "/rw") -> allowed tools
 
 	// Related resources (populated by correlation)
 	RelatedBackends  []RelatedResource `json:"relatedBackends"`
@@ -211,6 +214,7 @@ func correlateMCPServer(view *MCPServerView, state *ClusterState, findings []Fin
 					"parentGatewayNamespace": route.ParentGatewayNamespace,
 					"hasCORSFilter":          route.HasCORSFilter,
 					"usesAGWBackend":         routeUsesAGWBackend,
+					"paths":                  route.Paths,
 				},
 			})
 			if route.HasCORSFilter {
@@ -340,18 +344,129 @@ func correlateMCPServer(view *MCPServerView, state *ClusterState, findings []Fin
 	}
 
 	// Compute effective tool count based on policy restrictions
-	if view.HasToolRestriction && len(view.EffectiveToolNames) > 0 {
-		// Deduplicate effective tool names
-		seen := map[string]bool{}
-		var unique []string
-		for _, t := range view.EffectiveToolNames {
-			if !seen[t] {
-				seen[t] = true
-				unique = append(unique, t)
+	if view.HasToolRestriction && len(view.RelatedPolicies) > 0 {
+		// When multiple policies restrict tools (e.g., for different path rules in the same HTTPRoute),
+		// they may restrict different sets of tools:
+		// - /ro path policy: allows 10 read-only tools
+		// - /rw path policy: allows 10 different read-write tools
+		//
+		// Instead of counting all unique tools (20), we should count tools restrictively:
+		// For each related HTTPRoute, take the SMALLEST tool set across all policies for that route.
+		// This represents the most restrictive exposure for that route.
+		// Then take the MAXIMUM across all routes (the least restrictive route).
+		//
+		// Also populate ToolsByRoute and ToolsByPolicy for UI display of per-route and per-policy tool restrictions.
+		
+		type policyToolInfo struct {
+			name  string
+			tools map[string]bool
+		}
+		toolSetsByRoute := make(map[string][]policyToolInfo)
+		
+		for _, pResource := range view.RelatedPolicies {
+			allowedTools, ok := pResource.Details["allowedTools"].([]string)
+			if !ok || len(allowedTools) == 0 {
+				continue
+			}
+			// Convert to set
+			toolSet := make(map[string]bool)
+			for _, tool := range allowedTools {
+				toolSet[tool] = true
+			}
+			
+			// Map policy to its related routes
+			for _, route := range view.RelatedRoutes {
+				routeKey := route.Name
+				toolSetsByRoute[routeKey] = append(toolSetsByRoute[routeKey], policyToolInfo{
+					name:  pResource.Name,
+					tools: toolSet,
+				})
 			}
 		}
-		view.EffectiveToolNames = unique
-		view.EffectiveToolCount = len(unique)
+		
+		// Initialize maps
+		view.ToolsByRoute = make(map[string][]string)
+		view.ToolsByPolicy = make(map[string]map[string][]string)
+		view.PathTools = make(map[string][]string)
+		
+		// For each route, track tools by policy and find the most restrictive set
+		var mostOpenToolSet map[string]bool
+		for routeName, policyToolInfos := range toolSetsByRoute {
+			if len(policyToolInfos) == 0 {
+				continue
+			}
+			
+			// Initialize route map in ToolsByPolicy
+			view.ToolsByPolicy[routeName] = make(map[string][]string)
+			
+			// Find the route resource to get its actual paths
+			var routeResource *HTTPRouteResource
+			for _, route := range view.RelatedRoutes {
+				if route.Name == routeName {
+					for i := range state.HTTPRoutes {
+						if state.HTTPRoutes[i].Name == routeName {
+							routeResource = &state.HTTPRoutes[i]
+							break
+						}
+					}
+					break
+				}
+			}
+			
+			// Store tools for each policy in this route
+			var minSet map[string]bool
+			for i, pti := range policyToolInfos {
+				var toolList []string
+				for tool := range pti.tools {
+					toolList = append(toolList, tool)
+				}
+				view.ToolsByPolicy[routeName][pti.name] = toolList
+				
+				// Map tools to actual HTTPRoute path (if available)
+				// Each policy corresponds to one rule in the HTTPRoute in order
+				if routeResource != nil && i < len(routeResource.Paths) {
+					pathValue := routeResource.Paths[i]
+					view.PathTools[pathValue] = toolList
+				}
+				
+				// Track the most restrictive (smallest) set for this route
+				if minSet == nil || len(pti.tools) < len(minSet) {
+					minSet = pti.tools
+				}
+			}
+			
+			// Store tools for this route (the most restrictive set)
+			var routeTools []string
+			for tool := range minSet {
+				routeTools = append(routeTools, tool)
+			}
+			view.ToolsByRoute[routeName] = routeTools
+			
+			// Take the largest of all the "most restrictive" sets
+			// (represents the least restrictive route)
+			if mostOpenToolSet == nil || len(minSet) > len(mostOpenToolSet) {
+				mostOpenToolSet = minSet
+			}
+		}
+		
+		var effective []string
+		if mostOpenToolSet != nil {
+			for tool := range mostOpenToolSet {
+				effective = append(effective, tool)
+			}
+		} else {
+			// Fallback: deduplicate union if no clear route mapping
+			seen := make(map[string]bool)
+			for _, t := range view.EffectiveToolNames {
+				if !seen[t] {
+					seen[t] = true
+					effective = append(effective, t)
+				}
+			}
+		}
+		
+		view.EffectiveToolNames = effective
+		view.EffectiveToolCount = len(effective)
 	} else {
 		// No policy restriction — effective = total discovered
 		view.EffectiveToolCount = view.ToolCount
@@ -1133,3 +1248,4 @@ func mcpAgentStatus(a KagentAgentResource) string {
 	}
 	return "warning"
 }
+

@@ -5,7 +5,20 @@
 # AgentGateways for governance compliance
 # Two paths: /mcp/grafana/ro (read-only) and /mcp/grafana/rw (read-write)
 # ============================================
-
+---
+# Gateway for kagent MCP traffic
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: kagent-mcp-gateway
+  namespace: kagent
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+---
 # AgentgatewayBackend for read-only operations
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -69,7 +82,7 @@ spec:
     - matches:
         - path:
             type: PathPrefix
-            value: /mcp/grafana/rw
+            value: /mcp/grafana/rwtest
       backendRefs:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
@@ -131,6 +144,12 @@ spec:
           - "mcp.tool.name in ['get_dashboard_by_uid', 'get_dashboard_summary', 'search_dashboards', 'list_datasources', 'query_prometheus', 'query_loki_logs', 'list_alert_rules', 'get_annotations', 'list_incidents', 'get_panel_image']"
   # Prompt Guard - Block prompt injection and mask sensitive data
   backend:
+    mcp:
+     authorization:
+      action: Allow
+      policy:
+        matchExpressions:
+          - "mcp.tool.name in ['get_dashboard_by_uid', 'get_dashboard_summary', 'search_dashboards', 'list_datasources', 'query_prometheus', 'query_loki_logs', 'list_alert_rules', 'get_annotations', 'list_incidents', 'get_panel_image']"
     ai:
       promptGuard:
         request:
@@ -205,13 +224,19 @@ spec:
           requests: 60
           burst: 15
     # Authorization - Allow 10 read-write Grafana tools
-    authorization:
+    #authorization:
+    #  action: Allow
+    #  policy:
+    #    matchExpressions:
+    #      - "mcp.tool.name in ['create_dashboard', 'update_dashboard', 'delete_dashboard', 'add_datasource', 'update_datasource', 'create_alert_rule', 'update_alert_rule', 'create_annotation', 'update_annotation', 'add_incident']"
+  # Prompt Guard - Block prompt injection and mask sensitive data
+  backend:
+    mcp:
+     authorization:
       action: Allow
       policy:
         matchExpressions:
           - "mcp.tool.name in ['create_dashboard', 'update_dashboard', 'delete_dashboard', 'add_datasource', 'update_datasource', 'create_alert_rule', 'update_alert_rule', 'create_annotation', 'update_annotation', 'add_incident']"
-  # Prompt Guard - Block prompt injection and mask sensitive data
-  backend:
     ai:
       promptGuard:
         request:
