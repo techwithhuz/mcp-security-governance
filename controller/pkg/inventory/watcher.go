@@ -33,6 +33,7 @@ type Watcher struct {
 	mu        sync.RWMutex
 	resources map[string]*VerifiedResource // key: "namespace/name"
 	summary   VerifiedSummary
+	lastPatchedScore map[string]int // key: "namespace/name", tracks last score we patched to avoid re-patching
 
 	// Stats
 	statsMu       sync.RWMutex
@@ -79,6 +80,7 @@ func NewWatcher(cfg WatcherConfig) (*Watcher, error) {
 		policy:    cfg.Policy,
 		namespace: cfg.Namespace,
 		resources: make(map[string]*VerifiedResource),
+		lastPatchedScore: make(map[string]int),
 		stopCh:    make(chan struct{}),
 		OnChange:  cfg.OnChange,
 		PatchStatusOnUpdate: cfg.PatchStatusOnUpdate,
@@ -257,6 +259,11 @@ func (w *Watcher) onAdd(obj *unstructured.Unstructured) {
 		defer cancel()
 		if err := w.patcher.PatchCatalogStatus(ctx, res); err != nil {
 			log.Printf("[inventory] WARNING: Failed to patch status for %s: %v", key, err)
+		} else {
+			// Track that we patched this score
+			w.mu.Lock()
+			w.lastPatchedScore[key] = res.VerifiedScore.Score
+			w.mu.Unlock()
 		}
 	}
 
@@ -293,6 +300,11 @@ func (w *Watcher) onUpdate(obj *unstructured.Unstructured) {
 
 	w.mu.Lock()
 	w.resources[key] = res
+	
+	// Check if score changed since last patch
+	lastScore, hadLastScore := w.lastPatchedScore[key]
+	scoreChanged := !hadLastScore || lastScore != res.VerifiedScore.Score
+	
 	w.mu.Unlock()
 
 	w.recomputeSummary()
@@ -300,12 +312,17 @@ func (w *Watcher) onUpdate(obj *unstructured.Unstructured) {
 	log.Printf("[inventory] MCPServerCatalog UPDATED: %s — Verified Score: %d (%s) Grade: %s",
 		key, res.VerifiedScore.Score, res.VerifiedScore.Status, res.VerifiedScore.Grade)
 
-	// Patch the resource status if enabled
-	if w.PatchStatusOnUpdate {
+	// Patch the resource status only if score changed (avoids reconciliation loop)
+	if w.PatchStatusOnUpdate && scoreChanged {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := w.patcher.PatchCatalogStatus(ctx, res); err != nil {
 			log.Printf("[inventory] WARNING: Failed to patch status for %s: %v", key, err)
+		} else {
+			// Track that we patched this score
+			w.mu.Lock()
+			w.lastPatchedScore[key] = res.VerifiedScore.Score
+			w.mu.Unlock()
 		}
 	}
 
