@@ -160,6 +160,7 @@ func main() {
 			DynamicClient: discoverer.DynamicClient(),
 			Policy: invPolicy,
 			Namespace: "", // watch all namespaces
+			PatchStatusOnUpdate: true, // Enable status patching with governance scores
 			OnChange: func() {
 				// Log when inventory verified scores change
 				log.Printf("[inventory] Verified resources updated — scores reconciled")
@@ -169,7 +170,7 @@ func main() {
 			log.Printf("[governance] WARNING: Failed to create inventory watcher: %v", err)
 		} else {
 			inventoryWatcher = iw
-			log.Printf("[governance] Inventory watcher enabled — scoring MCPServerCatalog resources on change")
+			log.Printf("[governance] Inventory watcher enabled — scoring MCPServerCatalog resources on change and patching status")
 			go inventoryWatcher.Start(context.Background())
 		}
 	} else {

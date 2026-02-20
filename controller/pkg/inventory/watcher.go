@@ -28,6 +28,7 @@ type Watcher struct {
 	dynClient    dynamic.Interface
 	policy       ScoringPolicy
 	namespace    string // namespace to watch (empty = all namespaces)
+	patcher      *StatusPatcher // patches status.publisher field
 
 	mu        sync.RWMutex
 	resources map[string]*VerifiedResource // key: "namespace/name"
@@ -47,6 +48,9 @@ type Watcher struct {
 	// OnChange is called whenever verified resources are updated.
 	// Can be used to trigger downstream actions (e.g. re-score cluster).
 	OnChange func()
+	
+	// PatchStatusOnUpdate controls whether to patch resource status after scoring
+	PatchStatusOnUpdate bool
 }
 
 // WatcherConfig configures the inventory watcher.
@@ -59,6 +63,9 @@ type WatcherConfig struct {
 	Namespace string
 	// OnChange callback when resources are reconciled.
 	OnChange func()
+	// PatchStatusOnUpdate controls whether to patch resource status after scoring.
+	// If true, the watcher will update the .status.publisher field with governance scores.
+	PatchStatusOnUpdate bool
 }
 
 // NewWatcher creates a new inventory watcher.
@@ -68,11 +75,13 @@ func NewWatcher(cfg WatcherConfig) (*Watcher, error) {
 	}
 	return &Watcher{
 		dynClient: cfg.DynamicClient,
+		patcher:   NewStatusPatcher(cfg.DynamicClient),
 		policy:    cfg.Policy,
 		namespace: cfg.Namespace,
 		resources: make(map[string]*VerifiedResource),
 		stopCh:    make(chan struct{}),
 		OnChange:  cfg.OnChange,
+		PatchStatusOnUpdate: cfg.PatchStatusOnUpdate,
 	}, nil
 }
 
@@ -242,6 +251,15 @@ func (w *Watcher) onAdd(obj *unstructured.Unstructured) {
 	log.Printf("[inventory] MCPServerCatalog ADDED: %s — Verified Score: %d (%s) Grade: %s",
 		key, res.VerifiedScore.Score, res.VerifiedScore.Status, res.VerifiedScore.Grade)
 
+	// Patch the resource status if enabled
+	if w.PatchStatusOnUpdate {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := w.patcher.PatchCatalogStatus(ctx, res); err != nil {
+			log.Printf("[inventory] WARNING: Failed to patch status for %s: %v", key, err)
+		}
+	}
+
 	w.statsMu.Lock()
 	w.lastReconcile = time.Now()
 	w.reconcileCount++
@@ -281,6 +299,15 @@ func (w *Watcher) onUpdate(obj *unstructured.Unstructured) {
 
 	log.Printf("[inventory] MCPServerCatalog UPDATED: %s — Verified Score: %d (%s) Grade: %s",
 		key, res.VerifiedScore.Score, res.VerifiedScore.Status, res.VerifiedScore.Grade)
+
+	// Patch the resource status if enabled
+	if w.PatchStatusOnUpdate {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := w.patcher.PatchCatalogStatus(ctx, res); err != nil {
+			log.Printf("[inventory] WARNING: Failed to patch status for %s: %v", key, err)
+		}
+	}
 
 	w.statsMu.Lock()
 	w.lastReconcile = time.Now()
