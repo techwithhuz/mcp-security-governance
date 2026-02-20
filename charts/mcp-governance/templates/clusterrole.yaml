@@ -5,6 +5,20 @@ metadata:
   labels:
     {{- include "mcp-governance.controllerLabels" . | nindent 4 }}
 rules:
+- apiGroups: ["agentregistry.dev"]
+  resources:
+    - mcpservercatalogs/status
+    - agentcatalogs/status
+    - skillcatalogs/status
+    - modelcatalogs/status
+  verbs: ["get", "patch", "update"]
+- apiGroups: ["agentregistry.dev"]
+  resources:
+    - mcpservercatalogs
+    - agentcatalogs
+    - skillcatalogs
+    - modelcatalogs
+  verbs: ["get", "list", "watch"]
   # AgentGateway CRDs
   - apiGroups: ["agentgateway.dev"]
     resources:
