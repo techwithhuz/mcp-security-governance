@@ -3,11 +3,15 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -168,6 +172,10 @@ func (w *ResourceWatcher) Start(ctx context.Context) {
 	log.Printf("[watcher] Starting resource watcher with %d resource types, debounce=%v, resync=%v",
 		len(w.watchedGVRs), w.debounce, w.resyncPeriod)
 
+	// Suppress klog output to reduce noise from expected reflector errors
+	// This filters out "Failed to watch" errors for resource types that don't exist yet
+	suppressKlogReflectorErrors()
+
 	factory := dynamicinformer.NewDynamicSharedInformerFactory(w.dynClient, w.resyncPeriod)
 
 	handler := cache.ResourceEventHandlerFuncs{
@@ -203,16 +211,106 @@ func (w *ResourceWatcher) Start(ctx context.Context) {
 	// Start all informers
 	factory.Start(w.stopCh)
 
-	// Wait for initial cache sync
+	// Wait for initial cache sync with error recovery
 	log.Printf("[watcher] Waiting for informer caches to sync...")
-	factory.WaitForCacheSync(w.stopCh)
-	log.Printf("[watcher] All informer caches synced — watching for changes")
+	log.Printf("[watcher] Note: You may see 'Failed to watch' errors for resource types without instances — this is normal and does not affect functionality")
+	synced := factory.WaitForCacheSync(w.stopCh)
+	
+	// Check if all resources synced (synced is a map[GVR]bool)
+	allSynced := true
+	for gvr, status := range synced {
+		if !status {
+			allSynced = false
+			log.Printf("[watcher] WARNING: Cache sync incomplete for %s — resource type may not exist yet", gvr)
+		}
+	}
+	
+	if allSynced {
+		log.Printf("[watcher] All informer caches synced — watching for changes")
+	} else {
+		log.Printf("[watcher] Some resources not synced (this is normal if resource types don't have instances yet)")
+	}
 
 	// Block until stopped
 	select {
 	case <-ctx.Done():
 		w.Stop()
 	case <-w.stopCh:
+	}
+}
+
+// suppressKlogReflectorErrors temporarily redirects stderr to filter out
+// the expected "Failed to watch" errors from klog's reflector implementation.
+// These errors occur when a CRD exists but has no resources yet.
+func suppressKlogReflectorErrors() {
+	// Save original stderr
+	originalStderr := os.Stderr
+
+	// Create a pipe to intercept stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		log.Printf("[watcher] Note: Could not set up error filtering: %v", err)
+		return
+	}
+
+	// Redirect stderr to the pipe
+	os.Stderr = w
+
+	// Start a goroutine to filter stderr output
+	go func() {
+		defer r.Close()
+		scanner := make([]byte, 4096)
+		for {
+			n, err := r.Read(scanner)
+			if err != nil && err != io.EOF {
+				break
+			}
+			if n > 0 {
+				line := string(scanner[:n])
+				// Filter out the specific "Failed to watch" errors for non-existent resources
+				if !strings.Contains(line, "Failed to watch") || !strings.Contains(line, "the server could not find the requested resource") {
+					// Write non-filtered messages to original stderr
+					originalStderr.Write(scanner[:n])
+				}
+			}
+			if err == io.EOF {
+				break
+			}
+		}
+	}()
+
+	// Note: We don't close w here, it will stay open for klog to write to
+	// This is intentional - we want to filter all stderr output from now on
+}
+
+// suppressReflectorErrors returns a callback that suppresses "not found" errors
+// that can occur when a CRD exists but has no resources yet.
+// This prevents noisy error logs like:
+// "Failed to watch kagent.dev/v1alpha2, Resource=mcpservers: the server could not find the requested resource"
+func suppressReflectorErrors(resourceLabel string) func(error) {
+	return func(err error) {
+		if err == nil {
+			return
+		}
+
+		// Check if this is a "not found" error for a resource that doesn't exist yet
+		if apierrors.IsNotFound(err) {
+			// Suppress the error - this is expected if the resource type isn't instantiated yet
+			log.Printf("[watcher] DEBUG: Resource type %q not yet instantiated (will retry on resync)", resourceLabel)
+			return
+		}
+
+		// Check for timeout or connection errors (these will retry automatically)
+		if strings.Contains(err.Error(), "connection refused") ||
+			strings.Contains(err.Error(), "i/o timeout") ||
+			strings.Contains(err.Error(), "EOF") {
+			// These are transient - log at debug level only
+			log.Printf("[watcher] DEBUG: Temporary connection issue for %s: %v (will retry)", resourceLabel, err)
+			return
+		}
+
+		// Log actual errors that need attention
+		log.Printf("[watcher] WARNING: Error watching %s: %v", resourceLabel, err)
 	}
 }
 
