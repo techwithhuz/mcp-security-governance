@@ -1,0 +1,60 @@
+apiVersion: governance.mcp.io/v1alpha1
+kind: MCPGovernancePolicy
+metadata:
+  name: dynamic-resources-policy
+  namespace: default
+spec:
+  # Basic governance requirements
+  requireAgentGateway: true
+  requireCORS: true
+  requireJWTAuth: true
+  requireRBAC: true
+  requirePromptGuard: true
+  requireTLS: true
+  requireRateLimit: true
+  
+  # Define which resource types to watch for governance scoring
+  # Just specify the resource type names - the controller maps them to Kubernetes GVRs
+  # Supported types: MCPServerCatalog, Agent, RemoteMCPServer, Gateway, HTTPRoute
+  resourceTypes:
+    - "MCPServerCatalog"   # agentregistry.dev/v1alpha1/mcpservercatalogs
+    - "Agent"              # kagent.dev/v1alpha2/agents
+    - "RemoteMCPServer"    # kagent.dev/v1alpha2/remotemcpservers
+    - "Gateway"            # gateway.networking.k8s.io/v1/gateways
+  
+  # Scoring configuration
+  verifiedCatalogScoring:
+    securityWeight: 50      # Weight for transport + deployment security
+    trustWeight: 30         # Weight for publisher verification
+    complianceWeight: 20    # Weight for tool scope and usage patterns
+    
+    verifiedThreshold: 70   # Score >= 70 means Verified
+    unverifiedThreshold: 50 # Score >= 50 means Unverified
+    
+    checkMaxScores:
+      "PUB-001": 15         # Publisher verification max score
+      "SEC-001": 20         # Transport security max score
+      "DEP-001": 15         # Deployment readiness max score
+      "TOOL-001": 20        # Tool scope max score
+      "USAGE-001": 15       # Usage patterns max score
+  
+  # Monitoring configuration
+  targetNamespaces:
+    - "agentregistry"       # Monitor catalog resources in agentregistry
+    - "default"             # Monitor default namespace
+  
+  excludeNamespaces:
+    - "kube-system"         # Never monitor system namespaces
+    - "kube-public"
+  
+  # Tool count thresholds
+  maxToolsWarning: 50       # Warn if server exposes > 50 tools
+  maxToolsCritical: 100     # Critical if server exposes > 100 tools
+  
+  # AI-driven governance scoring (optional)
+  aiAgent:
+    enabled: false          # Set to true if using Google ADK
+    provider: "gemini"      # or "ollama"
+    model: "gemini-2.5-flash"
+    scanInterval: "5m"
+    scanEnabled: true

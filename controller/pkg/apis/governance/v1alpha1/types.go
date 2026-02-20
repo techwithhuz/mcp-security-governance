@@ -5,6 +5,7 @@ import (
 )
 
 // +genclient
+// +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // MCPGovernancePolicy defines the governance policy for MCP resources
@@ -47,6 +48,10 @@ type MCPGovernancePolicySpec struct {
 	// VerifiedCatalogScoring configures scoring thresholds, category weights, and per-check max scores
 	// for the Verified Catalog (MCPServerCatalog inventory) scoring model.
 	VerifiedCatalogScoring *VerifiedCatalogScoringConfig `json:"verifiedCatalogScoring,omitempty"`
+	// ResourceTypes specifies which resource types to watch for governance scoring.
+	// Examples: "MCPServerCatalog", "Agent", "RemoteMCPServer"
+	// If omitted, defaults to ["MCPServerCatalog"] only.
+	ResourceTypes []string `json:"resourceTypes,omitempty"`
 }
 
 // VerifiedCatalogScoringConfig allows users to customise the Verified Catalog scoring model

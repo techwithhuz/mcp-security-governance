@@ -172,6 +172,12 @@ spec:
                       description: "Per-check maximum score overrides. Keys are check IDs (PUB-001, PUB-002, PUB-003, SEC-001, SEC-002, DEP-001, DEP-002, DEP-003, TOOL-001, USE-001)."
                       additionalProperties:
                         type: integer
+                resourceTypes:
+                  type: array
+                  description: "Resource types to watch for governance scoring. Examples: 'MCPServerCatalog', 'Agent', 'RemoteMCPServer', 'Gateway', 'HTTPRoute'. If omitted, defaults to ['MCPServerCatalog']."
+                  items:
+                    type: string
+                  default: ["MCPServerCatalog"]
             status:
               type: object
               properties:

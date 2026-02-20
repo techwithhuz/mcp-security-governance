@@ -22,13 +22,17 @@ var MCPServerCatalogGVR = schema.GroupVersionResource{
 	Resource: "mcpservercatalogs",
 }
 
-// Watcher watches MCPServerCatalog resources from the Agent Registry inventory
+// Watcher watches catalog resources from the Agent Registry inventory
 // and scores each one with a Verified Score upon add/update/delete.
+// Supports multiple resource types through dynamic resource discovery.
 type Watcher struct {
 	dynClient    dynamic.Interface
 	policy       ScoringPolicy
 	namespace    string // namespace to watch (empty = all namespaces)
 	patcher      *StatusPatcher // patches status.publisher field
+
+	// watchedGVRs holds the GroupVersionResources to monitor
+	watchedGVRs []schema.GroupVersionResource
 
 	mu        sync.RWMutex
 	resources map[string]*VerifiedResource // key: "namespace/name"
@@ -66,6 +70,9 @@ type WatcherConfig struct {
 	// PatchStatusOnUpdate controls whether to patch resource status after scoring.
 	// If true, the watcher will update the .status.publisher field with governance scores.
 	PatchStatusOnUpdate bool
+	// ResourceTypes specifies which resource types to watch (e.g., "MCPServerCatalog", "Agent").
+	// If empty, defaults to ["MCPServerCatalog"] only.
+	ResourceTypes []string
 }
 
 // NewWatcher creates a new inventory watcher.
@@ -73,22 +80,40 @@ func NewWatcher(cfg WatcherConfig) (*Watcher, error) {
 	if cfg.DynamicClient == nil {
 		return nil, fmt.Errorf("DynamicClient is required")
 	}
+
+	// Discover watched resources from policy or use defaults
+	var watchedGVRs []schema.GroupVersionResource
+	
+	if len(cfg.ResourceTypes) > 0 {
+		log.Printf("[watcher] Discovering resource types from policy")
+		
+		discovered, err := DiscoverWatchedResources(cfg.ResourceTypes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover resources: %w", err)
+		}
+		watchedGVRs = discovered
+	} else {
+		log.Printf("[watcher] Using default resource types")
+		watchedGVRs = DefaultWatchedResources()
+	}
+
 	return &Watcher{
-		dynClient: cfg.DynamicClient,
-		patcher:   NewStatusPatcher(cfg.DynamicClient),
-		policy:    cfg.Policy,
-		namespace: cfg.Namespace,
-		resources: make(map[string]*VerifiedResource),
-		stopCh:    make(chan struct{}),
-		OnChange:  cfg.OnChange,
+		dynClient:    cfg.DynamicClient,
+		patcher:      NewStatusPatcher(cfg.DynamicClient),
+		policy:       cfg.Policy,
+		namespace:    cfg.Namespace,
+		watchedGVRs:  watchedGVRs,
+		resources:    make(map[string]*VerifiedResource),
+		stopCh:       make(chan struct{}),
+		OnChange:     cfg.OnChange,
 		PatchStatusOnUpdate: cfg.PatchStatusOnUpdate,
 	}, nil
 }
 
-// Start begins watching MCPServerCatalog resources. Blocks until ctx is
+// Start begins watching configured catalog resources. Blocks until ctx is
 // cancelled or Stop() is called.
 func (w *Watcher) Start(ctx context.Context) {
-	log.Printf("[inventory] Starting MCPServerCatalog watcher (namespace=%q)", w.namespace)
+	log.Printf("[inventory] Starting resource watcher for %d resource types (namespace=%q)", len(w.watchedGVRs), w.namespace)
 
 	var factory dynamicinformer.DynamicSharedInformerFactory
 	if w.namespace != "" {
@@ -99,8 +124,7 @@ func (w *Watcher) Start(ctx context.Context) {
 		factory = dynamicinformer.NewDynamicSharedInformerFactory(w.dynClient, 5*time.Minute)
 	}
 
-	informer := factory.ForResource(MCPServerCatalogGVR).Informer()
-
+	// Create event handler that will be used for all resources
 	handler := cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			u, ok := obj.(*unstructured.Unstructured)
@@ -143,19 +167,26 @@ func (w *Watcher) Start(ctx context.Context) {
 		},
 	}
 
-	_, err := informer.AddEventHandler(handler)
-	if err != nil {
-		log.Printf("[inventory] WARNING: Failed to add event handler: %v", err)
-		return
+	// Watch all configured resource types
+	for _, gvr := range w.watchedGVRs {
+		informer := factory.ForResource(gvr).Informer()
+		
+		_, err := informer.AddEventHandler(handler)
+		if err != nil {
+			log.Printf("[inventory] WARNING: Failed to add event handler for %s: %v", gvr.String(), err)
+			continue
+		}
+		
+		log.Printf("[inventory] Added watcher for %s", gvr.String())
 	}
 
-	// Start the informer
+	// Start the informer factory
 	factory.Start(w.stopCh)
 
 	// Wait for cache sync
-	log.Printf("[inventory] Waiting for MCPServerCatalog informer cache sync...")
+	log.Printf("[inventory] Waiting for catalog resource informer cache sync...")
 	factory.WaitForCacheSync(w.stopCh)
-	log.Printf("[inventory] MCPServerCatalog cache synced — watching for changes")
+	log.Printf("[inventory] Catalog resource cache synced — watching for changes across %d resource types", len(w.watchedGVRs))
 
 	// Block until stopped
 	select {
@@ -172,7 +203,7 @@ func (w *Watcher) Stop() {
 	if !w.stopped {
 		w.stopped = true
 		close(w.stopCh)
-		log.Printf("[inventory] MCPServerCatalog watcher stopped")
+		log.Printf("[inventory] Resource watcher stopped")
 	}
 }
 
@@ -248,8 +279,8 @@ func (w *Watcher) onAdd(obj *unstructured.Unstructured) {
 
 	w.recomputeSummary()
 
-	log.Printf("[inventory] MCPServerCatalog ADDED: %s — Verified Score: %d (%s) Grade: %s",
-		key, res.VerifiedScore.Score, res.VerifiedScore.Status, res.VerifiedScore.Grade)
+	log.Printf("[inventory] %s ADDED: %s — Verified Score: %d (%s) Grade: %s",
+		obj.GetKind(), key, res.VerifiedScore.Score, res.VerifiedScore.Status, res.VerifiedScore.Grade)
 
 	// Patch the resource status if enabled
 	if w.PatchStatusOnUpdate {
@@ -297,8 +328,8 @@ func (w *Watcher) onUpdate(obj *unstructured.Unstructured) {
 
 	w.recomputeSummary()
 
-	log.Printf("[inventory] MCPServerCatalog UPDATED: %s — Verified Score: %d (%s) Grade: %s",
-		key, res.VerifiedScore.Score, res.VerifiedScore.Status, res.VerifiedScore.Grade)
+	log.Printf("[inventory] %s UPDATED: %s — Verified Score: %d (%s) Grade: %s",
+		obj.GetKind(), key, res.VerifiedScore.Score, res.VerifiedScore.Status, res.VerifiedScore.Grade)
 
 	// Patch the resource status if enabled
 	if w.PatchStatusOnUpdate {
@@ -332,7 +363,7 @@ func (w *Watcher) onDelete(obj *unstructured.Unstructured) {
 
 	w.recomputeSummary()
 
-	log.Printf("[inventory] MCPServerCatalog DELETED: %s — removed from verified resources", key)
+	log.Printf("[inventory] %s DELETED: %s — removed from verified resources", obj.GetKind(), key)
 
 	w.statsMu.Lock()
 	w.lastReconcile = time.Now()
