@@ -26,6 +26,7 @@
 - [Architecture](#-architecture)
 - [What It Checks](#-what-it-checks)
 - [Verified Catalog Scoring](#-verified-catalog-scoring)
+- [Governance Controller Status Updates](#-governance-controller-status-updates)
 - [MCP-Server-Centric Scoring](#-mcp-server-centric-scoring)
 - [Scoring Model](#-scoring-model)
 - [AI-Powered Governance Scoring](#-ai-powered-governance-scoring)
@@ -331,6 +332,103 @@ spec:
     "criticalCount": 0
   }
 }
+```
+
+---
+
+## 🔄 Governance Controller Status Updates
+
+The governance controller automatically updates the `.status.publisher` field of catalog resources with verified governance scores in real-time. This enables the Agent Registry UI and other integrations to display trust badges and governance grades directly on catalog cards.
+
+### Automatic Status Patching
+
+When the controller detects changes to `MCPServerCatalog` resources, it:
+
+1. **Scores** the catalog based on governance policies
+2. **Patches** the resource's `.status.publisher` field with:
+   - **score** (0–100) — Numeric governance score
+   - **grade** (A–F) — Letter grade derived from score
+   - **verifiedPublisher** (boolean) — Whether publisher identity is verified
+   - **verifiedOrganization** (boolean) — Whether organization is verified
+   - **gradedAt** (RFC3339 timestamp) — When the score was last evaluated
+
+### Status Field Example
+
+After scoring, the resource status looks like:
+
+```yaml
+apiVersion: agentregistry.dev/v1alpha1
+kind: MCPServerCatalog
+metadata:
+  name: kagent-kagent-grafana-mcp
+  namespace: agentregistry
+spec:
+  name: "kagent/kagent-grafana-mcp"
+  title: "Grafana MCP Server"
+  # ... spec fields ...
+status:
+  publisher:
+    score: 78
+    grade: "B"
+    verifiedPublisher: true
+    verifiedOrganization: true
+    gradedAt: "2026-02-20T04:51:45Z"
+  published: true
+  usedBy: [...]
+  # ... other status fields ...
+```
+
+### Grade Thresholds
+
+| Grade | Score Range | Status |
+|---|---|---|
+| **A** | 90–100 | ✅ Excellent |
+| **B** | 80–89 | ✅ Good |
+| **C** | 70–79 | ⚠️ Fair |
+| **D** | 60–69 | ⚠️ Poor |
+| **F** | 0–59 | ❌ Critical |
+
+### UI Display
+
+Once patched, the Agent Registry UI renders the grade as a **color-coded badge** on each catalog card:
+
+- **A** — Green badge
+- **B** — Blue badge
+- **C** — Yellow badge
+- **D** — Orange badge
+- **F** — Red badge
+
+Hovering the badge shows the numeric score (e.g. `Governance score: 78/100`).
+
+### Supported Catalog Resources
+
+The controller automatically patches the status for:
+
+- `mcpservercatalogs` (agentregistry.dev/v1alpha1)
+- `agentcatalogs` (agentregistry.dev/v1alpha1)
+- `skillcatalogs` (agentregistry.dev/v1alpha1)
+- `modelcatalogs` (agentregistry.dev/v1alpha1)
+
+### RBAC Requirements
+
+The controller requires the following permissions to patch catalog status:
+
+```yaml
+rules:
+- apiGroups: ["agentregistry.dev"]
+  resources:
+    - mcpservercatalogs/status
+    - agentcatalogs/status
+    - skillcatalogs/status
+    - modelcatalogs/status
+  verbs: ["get", "patch", "update"]
+- apiGroups: ["agentregistry.dev"]
+  resources:
+    - mcpservercatalogs
+    - agentcatalogs
+    - skillcatalogs
+    - modelcatalogs
+  verbs: ["get", "list", "watch"]
 ```
 
 ---
