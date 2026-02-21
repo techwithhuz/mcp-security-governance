@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Image from 'next/image';
-import { Shield, RefreshCw, Activity, Clock, AlertTriangle, Wifi, WifiOff, Server, ChevronRight, Plug, Scan, Wrench, BadgeCheck } from 'lucide-react';
+import { Shield, RefreshCw, Activity, Clock, AlertTriangle, Wifi, WifiOff, Server, ChevronRight, Plug, Scan, Wrench, BadgeCheck, Info, Github } from 'lucide-react';
 import ScoreGauge from '@/components/ScoreGauge';
 import ResourceCards from '@/components/ResourceCards';
 import FindingsTable from '@/components/FindingsTable';
@@ -14,6 +14,7 @@ import AIScoreCard from '@/components/AIScoreCard';
 import MCPServerList from '@/components/MCPServerList';
 import MCPServerDetail from '@/components/MCPServerDetail';
 import VerifiedCatalog from '@/components/VerifiedCatalog';
+import InfoPage from '@/components/InfoPage';
 import type { MCPServerView, MCPServerSummary, MCPServersResponse, VerifiedResource, VerifiedSummary, VerifiedCatalogResponse, VerifiedInventory } from '@/lib/types';
 
 interface DashboardData {
@@ -33,10 +34,10 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog'>('overview');
+  const [activeTab, setActiveTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | 'info'>('overview');
   const [version, setVersion] = useState('');
   const [selectedMCPServer, setSelectedMCPServer] = useState<MCPServerView | null>(null);
-  const [previousTab, setPreviousTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | null>(null);
+  const [previousTab, setPreviousTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | 'info' | null>(null);
   const [lastScanTime, setLastScanTime] = useState<string>('');
   const [scanInterval, setScanInterval] = useState<string>('');
   const [scanning, setScanning] = useState(false);
@@ -204,34 +205,17 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* Last updated */}
-              {lastScanTime && (
-                <div className="flex items-center gap-1.5 text-xs text-gov-text-3" title={`Scan interval: ${scanInterval || 'N/A'}`}>
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>Scanned {new Date(lastScanTime).toLocaleTimeString()}</span>
-                  {scanInterval && <span className="text-gov-text-3/50">({scanInterval})</span>}
-                </div>
-              )}
-
-              {/* Scan Now button */}
-              <button
-                onClick={triggerScan}
-                disabled={scanning}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gov-accent/10 border border-blue-500/30 hover:bg-gov-accent/20 transition-all disabled:opacity-50 text-xs font-medium text-blue-400"
-                title="Trigger an on-demand governance scan"
+              {/* GitHub link */}
+              <a
+                href="https://github.com/techwithhuz/mcp-security-governance"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gov-surface border border-gov-border hover:border-gov-border-light hover:bg-gov-surface/80 transition-all text-xs font-medium text-gov-text-2"
+                title="View MCP-G on GitHub"
               >
-                <Scan className={`w-3.5 h-3.5 ${scanning ? 'animate-spin' : ''}`} />
-                {scanning ? 'Scanning...' : 'Scan Now'}
-              </button>
-
-              {/* Refresh button */}
-              <button
-                onClick={fetchData}
-                disabled={refreshing}
-                className="p-2 rounded-xl bg-gov-surface border border-gov-border hover:border-gov-border-light transition-all disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 text-gov-text-2 ${refreshing ? 'animate-spin' : ''}`} />
-              </button>
+                <Github className="w-3.5 h-3.5" />
+                GitHub
+              </a>
             </div>
           </div>
 
@@ -243,6 +227,7 @@ export default function Dashboard() {
               { id: 'verified-catalog' as const, label: 'Verified Catalog', icon: BadgeCheck },
               { id: 'resources' as const, label: 'Resource Inventory', icon: Server },
               { id: 'findings' as const, label: 'All Findings', icon: AlertTriangle },
+              { id: 'info' as const, label: 'About MCP-G', icon: Info },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -336,6 +321,9 @@ export default function Dashboard() {
           };
           return <VerifiedCatalog inventory={inventory} />;
         })()}
+
+        {/* ========== INFO TAB ========== */}
+        {activeTab === 'info' && <InfoPage />}
 
         {/* ========== OVERVIEW TAB ========== */}
         {activeTab === 'overview' && (

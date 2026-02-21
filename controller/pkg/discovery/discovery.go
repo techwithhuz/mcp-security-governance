@@ -564,11 +564,11 @@ func (d *K8sDiscoverer) discoverAgentgatewayPolicies(ctx context.Context) []eval
 	return policies
 }
 
-// discoverKagentAgents discovers kagent Agent CRs (v1alpha2)
+// discoverKagentAgents discovers kagent Agent CRs (v1alpha1)
 func (d *K8sDiscoverer) discoverKagentAgents(ctx context.Context) []evaluator.KagentAgentResource {
 	gvr := schema.GroupVersionResource{
 		Group:    "kagent.dev",
-		Version:  "v1alpha2",
+		Version:  "v1alpha1",
 		Resource: "agents",
 	}
 
@@ -696,11 +696,11 @@ func (d *K8sDiscoverer) discoverKagentMCPServers(ctx context.Context) []evaluato
 	return servers
 }
 
-// discoverKagentRemoteMCPServers discovers kagent RemoteMCPServer CRs (v1alpha2)
+// discoverKagentRemoteMCPServers discovers kagent RemoteMCPServer CRs (v1alpha1)
 func (d *K8sDiscoverer) discoverKagentRemoteMCPServers(ctx context.Context) []evaluator.KagentRemoteMCPServerResource {
 	gvr := schema.GroupVersionResource{
 		Group:    "kagent.dev",
-		Version:  "v1alpha2",
+		Version:  "v1alpha1",
 		Resource: "remotemcpservers",
 	}
 

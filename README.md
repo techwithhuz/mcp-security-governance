@@ -68,6 +68,8 @@ As AI agents powered by the **Model Context Protocol (MCP)** proliferate across 
 
 ## 🏗️ Architecture
 
+![Architecture](architecture.png)
+
 ```mermaid
 graph TB
     subgraph K8s["☸ Kubernetes Cluster"]

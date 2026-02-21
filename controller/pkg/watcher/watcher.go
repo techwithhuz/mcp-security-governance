@@ -48,12 +48,12 @@ func DefaultWatchedResources() []WatchedResource {
 				Group: "agentgateway.dev", Version: "v1alpha1", Resource: "agentgatewaypolicies",
 			},
 		},
-		{
+		/*{
 			Label: "MCPServer",
 			GVR: schema.GroupVersionResource{
 				Group: "kagent.dev", Version: "v1alpha2", Resource: "mcpservers",
 			},
-		},
+		},*/
 		{
 			Label: "RemoteMCPServer",
 			GVR: schema.GroupVersionResource{
