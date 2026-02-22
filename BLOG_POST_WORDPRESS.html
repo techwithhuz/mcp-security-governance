@@ -1,377 +1,194 @@
 <!-- wp:heading {"level":1} -->
-<h1>MCP Governance: AI-Powered Kubernetes-Native Security for Model Context Protocol Infrastructure</h1>
-<!-- /wp:heading -->
-
-<!-- wp:heading {"level":2} -->
-<h2>Introduction</h2>
+<h1>MCP Governance: Secure Your Kubernetes AI Agents with One Click</h1>
 <!-- /wp:heading -->
 
 <!-- wp:paragraph -->
-<p>The Model Context Protocol (MCP) is transforming how AI agents interact with tools and data. By exposing MCP servers across your Kubernetes clusters, you unlock powerful AI capabilities — but without proper governance, you're exposed to critical security risks.</p>
+<p>Your AI agents are powerful—but they're also a security risk. Model Context Protocol (MCP) servers expose tools, databases, and APIs that could be exploited by a single prompt injection attack. Without proper security controls, you're one malicious input away from a data breach.</p>
 <!-- /wp:paragraph -->
 
 <!-- wp:paragraph -->
-<p>Imagine this scenario: An AI agent with access to an unprotected MCP server that exposes 50+ tools. A prompt injection attack tricks the agent into executing an unauthorized database dump tool, exfiltrating sensitive customer data. No authentication layer stops it. No rate limiting prevents the runaway loop. No audit trail captures what happened.</p>
+<p><strong>MCP Governance (MCP-G)</strong> changes that. It's an open-source Kubernetes platform that discovers, scores, and secures all your MCP servers automatically—with zero manual setup.</p>
 <!-- /wp:paragraph -->
 
 <!-- wp:paragraph -->
-<p><strong>MCP Governance (MCP-G)</strong> solves this problem by providing enterprise-grade security and compliance for MCP infrastructure in Kubernetes. It's an AI-powered governance platform that discovers, evaluates, and secures all MCP-related resources in your cluster.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:paragraph -->
-<p>In this deep-dive, we'll explore how MCP-G works, why it matters, and how to deploy it to your Kubernetes cluster.</p>
+<p>In this guide, I'll show you what MCP-G does, why it matters, and how to deploy it in under 10 minutes.</p>
 <!-- /wp:paragraph -->
 
 <!-- wp:heading {"level":2} -->
-<h2>The Problem: Unsecured MCP Servers in Kubernetes</h2>
+<h2>Why MCP Security Matters</h2>
 <!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Most organizations deploying AI agents don't realize how exposed their MCP infrastructure really is. Here are the top 5 risks:</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:list -->
+<ul>
+<li><strong>No Visibility</strong> — You don't know how many MCP servers you have or which agents can access them</li>
+<li><strong>Unlimited Access</strong> — Agents can invoke any tool. If one gets compromised, attackers can do anything</li>
+<li><strong>Prompt Injection</strong> — Attackers trick AI agents into dumping databases or stealing API keys</li>
+<li><strong>No Audit Trail</strong> — When a breach happens, you have no way to trace who did what</li>
+<li><strong>Compliance Drift</strong> — Security policies slowly get ignored as your infrastructure grows</li>
+</ul>
+<!-- /wp:list -->
+
+<!-- wp:heading {"level":2} -->
+<h2>What Is MCP Governance?</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>MCP Governance is a lightweight Kubernetes controller that automatically:</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:list -->
+<ul>
+<li>🔍 <strong>Finds</strong> all your MCP servers and their configurations</li>
+<li>📊 <strong>Scores</strong> each server's security across 8 important categories</li>
+<li>⚠️ <strong>Flags</strong> critical security gaps with fix recommendations</li>
+<li>📈 <strong>Tracks</strong> improvements over time with a dashboard</li>
+<li>🧠 <strong>Uses AI</strong> (optional) to suggest better security practices</li>
+</ul>
+<!-- /wp:list -->
+
+<!-- wp:paragraph -->
+<p>It's built in Go, runs in Kubernetes, and deploys in minutes. No complex setup required.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2>Architecture: Two Simple Components</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>MCP-G runs two components in your Kubernetes cluster that work together to discover and secure your MCP infrastructure:</p>
+<!-- /wp:paragraph -->
 
 <!-- wp:heading {"level":3} -->
-<h3>Why MCP Governance Matters</h3>
+<h3>1. Governance Controller (Go)</h3>
 <!-- /wp:heading -->
 
 <!-- wp:paragraph -->
-<p>As AI agents become mainstream, organizations are deploying MCP servers across Kubernetes clusters to expose tools, databases, and APIs. However, this creates unprecedented security challenges:</p>
+<p>The controller is the brain of MCP-G. It runs as a Kubernetes deployment and continuously monitors your cluster:</p>
 <!-- /wp:paragraph -->
 
-<!-- wp:heading {"level":4} -->
-<h4>1. Zero Visibility</h4>
-<!-- /wp:heading -->
-
 <!-- wp:list -->
 <ul>
-<li>How many MCP servers are running in your cluster?</li>
-<li>Which agents have access to which tools?</li>
-<li>Are there unprotected servers exposed directly to the internet?</li>
-<li>Without discovery and inventory, you can't govern what you can't see.</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":4} -->
-<h4>2. Unconstrained Access</h4>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li>MCP servers often expose 50+ tools without restrictions</li>
-<li>A compromised agent or prompt injection attack can invoke any tool</li>
-<li>No principle of least privilege — agents get "all or nothing"</li>
-<li>Without authorization controls, blast radius grows exponentially</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":4} -->
-<h4>3. Prompt Injection Vulnerability</h4>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li>AI agents are susceptible to prompt injection attacks that trick them into executing unauthorized actions</li>
-<li>Malicious inputs can manipulate tool calls, triggering sensitive operations</li>
-<li>Sensitive data in tool responses (SSNs, credit cards, API keys) can be leaked to the AI model</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":4} -->
-<h4>4. No Audit Trail</h4>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li>Who called which tools? When? From which agent?</li>
-<li>Without logging and monitoring, compliance and forensics are impossible</li>
-<li>Incident response becomes guesswork</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":4} -->
-<h4>5. Configuration Drift</h4>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li>Security policies are defined in policy documents, not code</li>
-<li>Clusters drift from intended security posture over time</li>
-<li>No enforcement mechanism ensures policies are continuously applied</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":2} -->
-<h2>The Solution: MCP Governance (MCP-G)</h2>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p>MCP Governance is a Kubernetes-native platform that:</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list {"ordered":true} -->
-<ol>
-<li><strong>Discovers</strong> all MCP-related resources in your cluster automatically</li>
-<li><strong>Correlates</strong> resources into MCP-server-centric views</li>
+<li><strong>Discovers</strong> all MCP servers from AgentGateway, Kagent, and Agent Registry every 30 seconds</li>
 <li><strong>Evaluates</strong> security posture across 8 governance categories</li>
-<li><strong>Scores</strong> cluster compliance on a 0–100 scale</li>
-<li><strong>Analyzes</strong> risks with AI agents (optional: Google Gemini or Ollama)</li>
-<li><strong>Surfaces</strong> findings in a real-time enterprise dashboard</li>
-</ol>
+<li><strong>Scores</strong> each server on a 0–100 scale with A–F letter grades</li>
+<li><strong>Exposes</strong> results via REST API on port 8090</li>
+<li><strong>Analyzes</strong> risks with AI (optional: Google Gemini or Ollama) for deeper insights</li>
+</ul>
 <!-- /wp:list -->
 
-<!-- wp:heading {"level":2} -->
-<h2>Architecture: How MCP-G Works</h2>
-<!-- /wp:heading -->
-
-<!-- wp:image -->
-<figure class="wp-block-image"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 700 500'%3E%3Crect width='700' height='500' fill='%23f5f5f5'/%3E%3Ctext x='350' y='25' font-size='16' font-weight='bold' text-anchor='middle'%3EKubernetes Cluster%3C/text%3E%3Crect x='50' y='60' width='250' height='80' fill='%236366f1' stroke='%234f46e5' stroke-width='2'/%3E%3Ctext x='175' y='85' font-size='14' font-weight='bold' fill='white' text-anchor='middle'%3E🖥️ Dashboard%3C/text%3E%3Ctext x='175' y='105' font-size='12' fill='white' text-anchor='middle'%3ENext.js :3000%3C/text%3E%3Ctext x='175' y='125' font-size='11' fill='white' text-anchor='middle'%3E(every 15s)%3C/text%3E%3Crect x='400' y='60' width='250' height='120' fill='%230ea5e9' stroke='%230284c7' stroke-width='2'/%3E%3Ctext x='525' y='80' font-size='14' font-weight='bold' fill='white' text-anchor='middle'%3E⚙️ Governance Controller%3C/text%3E%3Ctext x='525' y='100' font-size='11' fill='white' text-anchor='middle'%3E• Go API Server :8090%3C/text%3E%3Ctext x='525' y='115' font-size='11' fill='white' text-anchor='middle'%3E• Scoring Engine%3C/text%3E%3Ctext x='525' y='130' font-size='11' fill='white' text-anchor='middle'%3E• AI Agent%3C/text%3E%3Ctext x='525' y='145' font-size='11' fill='white' text-anchor='middle'%3E• Resource Discovery%3C/text%3E%3Crect x='100' y='220' width='500' height='140' fill='%23f9fafb' stroke='%2394a3b8' stroke-width='2'/%3E%3Ctext x='350' y='240' font-size='13' font-weight='bold' text-anchor='middle'%3E📦 Discovered Resources%3C/text%3E%3Crect x='120' y='260' width='110' height='70' fill='%23f59e0b' stroke='%23d97706' stroke-width='1'/%3E%3Ctext x='175' y='280' font-size='11' font-weight='bold' text-anchor='middle'%3E🛡️ AgentGateway%3C/text%3E%3Ctext x='175' y='295' font-size='9' text-anchor='middle'%3E• Backend%3C/text%3E%3Ctext x='175' y='307' font-size='9' text-anchor='middle'%3E• Policy%3C/text%3E%3Crect x='255' y='260' width='110' height='70' fill='%2310b981' stroke='%23059669' stroke-width='1'/%3E%3Ctext x='310' y='280' font-size='11' font-weight='bold' text-anchor='middle'%3E🤖 Kagent%3C/text%3E%3Ctext x='310' y='295' font-size='9' text-anchor='middle'%3E• Agent%3C/text%3E%3Ctext x='310' y='307' font-size='9' text-anchor='middle'%3E• MCPServer%3C/text%3E%3Crect x='390' y='260' width='110' height='70' fill='%238b5cf6' stroke='%237c3aed' stroke-width='1'/%3E%3Ctext x='445' y='280' font-size='11' font-weight='bold' text-anchor='middle'%3E🌐 Gateway API%3C/text%3E%3Ctext x='445' y='295' font-size='9' text-anchor='middle'%3E• Gateway%3C/text%3E%3Ctext x='445' y='307' font-size='9' text-anchor='middle'%3E• HTTPRoute%3C/text%3E%3Crect x='525' y='260' width='60' height='70' fill='%23ef4444' stroke='%23dc2626' stroke-width='1'/%3E%3Ctext x='555' y='280' font-size='10' font-weight='bold' text-anchor='middle'%3E📋 Gov%3C/text%3E%3Crect x='100' y='410' width='150' height='70' fill='%23ec4899' stroke='%23db2777' stroke-width='2'/%3E%3Ctext x='175' y='430' font-size='12' font-weight='bold' fill='white' text-anchor='middle'%3E🌐 LLM Provider%3C/text%3E%3Ctext x='175' y='450' font-size='10' fill='white' text-anchor='middle'%3E• Google Gemini%3C/text%3E%3Ctext x='175' y='465' font-size='10' fill='white' text-anchor='middle'%3E• Ollama%3C/text%3E%3C/svg%3E" alt="MCP-G Architecture Diagram" /></figure>
-<!-- /wp:image -->
+<!-- wp:paragraph -->
+<p>The controller doesn't require any manual input—it reads your Kubernetes resources and automatically evaluates them.</p>
+<!-- /wp:paragraph -->
 
 <!-- wp:heading {"level":3} -->
-<h3>Data Flow</h3>
+<h3>2. Real-Time Dashboard (Next.js)</h3>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>The dashboard is a beautiful web interface that lets you see your MCP security posture at a glance:</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:list -->
+<ul>
+<li><strong>Overview Tab</strong> — Cluster score, grade, and trend over time</li>
+<li><strong>MCP Servers Tab</strong> — List of all discovered servers with individual scores and security gaps</li>
+<li><strong>Findings Tab</strong> — Specific security issues with clear fix recommendations</li>
+<li><strong>Resource Inventory Tab</strong> — All Kubernetes resources related to your MCP infrastructure</li>
+</ul>
+<!-- /wp:list -->
+
+<!-- wp:paragraph -->
+<p>The dashboard auto-refreshes every 15 seconds, so you always see the latest data.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":3} -->
+<h3>How They Work Together</h3>
 <!-- /wp:heading -->
 
 <!-- wp:list {"ordered":true} -->
 <ol>
-<li><strong>Discovery (Every 30 seconds)</strong> - Controller uses Kubernetes API to list all relevant resources and builds an MCP-server-centric inventory</li>
-<li><strong>Policy Reading</strong> - Controller reads <code>MCPGovernancePolicy</code> CRD to determine scoring thresholds and enforcement rules</li>
-<li><strong>Evaluation</strong> - Evaluator scores each MCP server across 8 governance categories and generates findings</li>
-<li><strong>AI Analysis (Optional)</strong> - If enabled, sends cluster state to LLM for deeper risk analysis and remediation suggestions</li>
-<li><strong>API &amp; Status Update</strong> - Results exposed via REST API and <code>GovernanceEvaluation</code> CRD updated with scoring details</li>
+<li>Controller discovers MCP servers and their configurations</li>
+<li>It evaluates each server across 8 security categories</li>
+<li>Assigns scores and identifies security gaps</li>
+<li>Exposes results via REST API</li>
+<li>Dashboard polls the API and displays findings in real-time</li>
+<li>Optional: AI agent analyzes results for deeper insights</li>
 </ol>
 <!-- /wp:list -->
 
-<!-- wp:heading {"level":2} -->
-<h2>Scoring System: 8 Governance Categories</h2>
-<!-- /wp:heading -->
-
 <!-- wp:paragraph -->
-<p>MCP-G evaluates security across 8 distinct categories, each with specific pass/fail criteria:</p>
+<p>Everything happens automatically—no manual configuration needed.</p>
 <!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>1. Gateway Routing (20 points)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p><strong>The Question:</strong> Is the MCP server routed through AgentGateway?</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list -->
-<ul>
-<li><strong>Pass:</strong> Server exposed through governed gateway → +20 points</li>
-<li><strong>Fail:</strong> Direct exposure without gateway layer → 0 points</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:paragraph -->
-<p><strong>Why It Matters:</strong> Without a gateway, there's no central enforcement point. Any tool call reaches the server unfiltered.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>2. Authentication (20 points)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p><strong>The Question:</strong> Is JWT or mutual-TLS authentication enforced?</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list -->
-<ul>
-<li><strong>Pass:</strong> JWT Strict mode enforced on the route → +20 points</li>
-<li><strong>Partial:</strong> JWT present but permissive mode → +10 points</li>
-<li><strong>Fail:</strong> No authentication required → 0 points</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:paragraph -->
-<p><strong>Why It Matters:</strong> Unauthenticated MCP servers let any agent or script invoke tools without identity verification.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>3. Authorization (15 points)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p><strong>The Question:</strong> Are tool calls filtered by an allow-list policy?</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list -->
-<ul>
-<li><strong>Pass:</strong> Tool allow-list enforced via AgentgatewayPolicy → +15 points</li>
-<li><strong>Fail:</strong> All tools exposed with no filter → 0 points</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:paragraph -->
-<p><strong>Why It Matters:</strong> Even authenticated agents should only access tools they need (principle of least privilege).</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>4. TLS Encryption (15 points)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p><strong>The Question:</strong> Is TLS configured on backend connections?</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list -->
-<ul>
-<li><strong>Pass:</strong> TLS with SNI verification enabled → +15 points</li>
-<li><strong>Fail:</strong> Plaintext backend connection → 0 points</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:paragraph -->
-<p><strong>Why It Matters:</strong> Without TLS, tool payloads can be intercepted in transit inside the cluster.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>5. CORS Policy (10 points)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p><strong>The Question:</strong> Is CORS configured to restrict cross-origin access?</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list -->
-<ul>
-<li><strong>Pass:</strong> CORS policy restricts allowed origins → +10 points</li>
-<li><strong>Partial:</strong> CORS configured via policy → +8 points</li>
-<li><strong>Fail:</strong> No CORS policy, all origins allowed → 0 points</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:paragraph -->
-<p><strong>Why It Matters:</strong> Without CORS, browser-based clients can be tricked into making unauthorized tool calls from malicious origins.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>6. Rate Limiting (10 points)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p><strong>The Question:</strong> Is rate limiting applied to prevent abuse?</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list -->
-<ul>
-<li><strong>Pass:</strong> Rate limit policy applied → +10 points</li>
-<li><strong>Fail:</strong> No rate limit, unlimited calls allowed → 0 points</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:paragraph -->
-<p><strong>Why It Matters:</strong> Agents in a runaway loop can make thousands of calls in seconds, causing disruption or data exfiltration.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>7. Prompt Guard (10 points)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p><strong>The Question:</strong> Is AI prompt injection protection enabled?</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list -->
-<ul>
-<li><strong>Pass:</strong> Prompt guard with injection detection + data masking → +10 points</li>
-<li><strong>Partial:</strong> Partial guard (request or response only) → +5 points</li>
-<li><strong>Fail:</strong> No prompt protection → 0 points</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:paragraph -->
-<p><strong>Why It Matters:</strong> Prompt injection attacks trick AI agents into unauthorized actions. Sensitive data in responses must be masked.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>8. Tool Scope (10 points)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p><strong>The Question:</strong> How tightly is the exposed tool surface restricted?</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list -->
-<ul>
-<li><strong>Pass:</strong> ≤25% of tools exposed (maximum restriction) → +10 points</li>
-<li><strong>Graduated:</strong> Sliding scale based on exposure percentage</li>
-<li><strong>Fail:</strong> 100% of tools exposed (no restriction) → 0 points</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:paragraph -->
-<p><strong>Why It Matters:</strong> Exposing all 50+ tools when an agent only needs 5 vastly increases the blast radius of compromise.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>Overall Scoring</h3>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li><strong>Maximum Score:</strong> 100 points</li>
-<li><strong>Per-Server Score:</strong> Weighted average of category scores</li>
-<li><strong>Cluster Score:</strong> Weighted average of all per-server scores</li>
-<li><strong>Grade Scale:</strong>
-<ul>
-<li><strong>A (90–100):</strong> Enterprise-grade security</li>
-<li><strong>B (80–89):</strong> Good security posture</li>
-<li><strong>C (70–79):</strong> Adequate controls, needs improvement</li>
-<li><strong>D (60–69):</strong> Significant gaps</li>
-<li><strong>F (&lt;60):</strong> Critical security issues</li>
-</ul>
-</li>
-</ul>
-<!-- /wp:list -->
 
 <!-- wp:heading {"level":2} -->
-<h2>Verified Catalog Scoring</h2>
+<h2>The 8 Security Checks</h2>
 <!-- /wp:heading -->
 
 <!-- wp:paragraph -->
-<p>Beyond MCP server evaluation, MCP-G includes <strong>Verified Catalog Scoring</strong> — a framework for evaluating MCP server catalog entries from your Agent Registry.</p>
+<p>MCP-G evaluates each server across these categories:</p>
 <!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>What It Evaluates</h3>
-<!-- /wp:heading -->
 
 <!-- wp:table -->
 <table>
 <thead>
 <tr>
-<th>Category</th>
-<th>Max Points</th>
-<th>What's Checked</th>
+<th>Check</th>
+<th>Points</th>
+<th>What We Look For</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>Publisher Verification</strong></td>
-<td>25</td>
-<td>Organization identity, signing certificates, credibility</td>
+<td><strong>Gateway Routing</strong></td>
+<td>20</td>
+<td>Is the server behind a gateway that enforces policies?</td>
 </tr>
 <tr>
-<td><strong>Transport Security</strong></td>
+<td><strong>Authentication</strong></td>
 <td>20</td>
-<td>TLS support, secure URLs, protocol compliance</td>
+<td>Must agents prove who they are before accessing tools?</td>
 </tr>
 <tr>
-<td><strong>Deployment Health</strong></td>
-<td>20</td>
-<td>Published status, readiness state, management type</td>
+<td><strong>Authorization</strong></td>
+<td>15</td>
+<td>Can we limit which tools each agent can use?</td>
+</tr>
+<tr>
+<td><strong>Encryption (TLS)</strong></td>
+<td>15</td>
+<td>Is data encrypted in transit?</td>
+</tr>
+<tr>
+<td><strong>Rate Limiting</strong></td>
+<td>10</td>
+<td>Can we stop runaway requests?</td>
+</tr>
+<tr>
+<td><strong>CORS Policy</strong></td>
+<td>10</td>
+<td>Are cross-origin requests restricted?</td>
+</tr>
+<tr>
+<td><strong>Prompt Guard</strong></td>
+<td>10</td>
+<td>Protected against prompt injection attacks?</td>
 </tr>
 <tr>
 <td><strong>Tool Scope</strong></td>
-<td>18</td>
-<td>Tool count compliance, exposure restrictions</td>
-</tr>
-<tr>
-<td><strong>Usage &amp; Integration</strong></td>
-<td>17</td>
-<td>Agent usage patterns, integration diversity</td>
+<td>10</td>
+<td>Are only necessary tools exposed (not all 50+)?</td>
 </tr>
 </tbody>
 </table>
 <!-- /wp:table -->
+
+<!-- wp:paragraph -->
+<p><strong>Scoring:</strong> 0–59 = F (Critical issues) | 60–69 = D | 70–79 = C | 80–89 = B | 90–100 = A (Enterprise-grade)</p>
+<!-- /wp:paragraph -->
 
 <!-- wp:heading {"level":2} -->
 <h2>Key Features</h2>
@@ -379,54 +196,50 @@
 
 <!-- wp:list -->
 <ul>
-<li><strong>🔍 Comprehensive Discovery</strong> - Automatically discovers all MCP-related resources and monitors 9 resource types with real-time updates every 30 seconds</li>
-<li><strong>📊 MCP-Server-Centric View</strong> - Correlates resources into per-server security profiles with gateway routes, policies, and tool restrictions</li>
-<li><strong>🎯 8-Category Scoring System</strong> - Evaluates Gateway routing, Authentication, Authorization, TLS, CORS, Rate limiting, Prompt guard, and Tool scope with weighted aggregation</li>
-<li><strong>🧠 AI-Powered Risk Analysis</strong> - Optional integration with Google Gemini or local Ollama for deeper risk assessment and actionable suggestions</li>
-<li><strong>📋 Verified Catalog Scoring</strong> - 5-category assessment of MCP server catalog entries with automated compliance checking</li>
-<li><strong>🖥️ Real-Time Dashboard</strong> - Next.js-based UI with 6 tabs, per-server drill-down, tool exposure metrics, and auto-refresh every 15 seconds</li>
-<li><strong>✍️ Policy-as-Code</strong> - <code>MCPGovernancePolicy</code> Kubernetes CRD for declarative governance with CEL-based expressions</li>
-<li><strong>📈 Comprehensive Findings</strong> - Critical to Low severity classifications with per-check status and remediation guidance</li>
-<li><strong>🔌 REST API</strong> - Complete endpoints for overview, MCP servers, findings, and verified catalog with JSON response format</li>
+<li>✅ <strong>Auto-Discovery</strong> — Finds all MCP servers without manual setup</li>
+<li>✅ <strong>Real-Time Dashboard</strong> — See security scores and findings instantly</li>
+<li>✅ <strong>Security Scoring</strong> — 8-category evaluation with A–F grades</li>
+<li>✅ <strong>Actionable Findings</strong> — Get specific fixes for each security gap</li>
+<li>✅ <strong>AI-Powered Analysis</strong> — Optional: Get smarter insights from Google Gemini or Ollama</li>
+<li>✅ <strong>REST API</strong> — Integrate with your existing security tools</li>
+<li>✅ <strong>Policy-as-Code</strong> — Define governance rules in Kubernetes (no UI config needed)</li>
+<li>✅ <strong>Open Source</strong> — 100% transparent, MIT licensed</li>
 </ul>
 <!-- /wp:list -->
 
 <!-- wp:heading {"level":2} -->
-<h2>Prerequisites</h2>
+<h2>What You Need</h2>
 <!-- /wp:heading -->
 
-<!-- wp:heading {"level":3} -->
-<h3>Required</h3>
-<!-- /wp:heading -->
+<!-- wp:paragraph -->
+<p><strong>Required:</strong></p>
+<!-- /wp:paragraph -->
 
 <!-- wp:list -->
 <ul>
-<li><strong>Kubernetes Cluster (1.24+)</strong> - Kind, EKS, GKE, AKS, or any CNCF-certified Kubernetes with cluster admin access and minimum 2 CPU cores, 2GB RAM</li>
-<li><strong>kubectl (1.24+)</strong> - Configured to access your cluster</li>
-<li><strong>Helm 3 (3.13+)</strong> - For deploying MCP-G via Helm chart</li>
+<li>Kubernetes 1.24+ (any cluster: EKS, GKE, AKS, Kind, etc.)</li>
+<li>kubectl access with cluster admin permission</li>
+<li>Helm 3.13+ installed</li>
 </ul>
 <!-- /wp:list -->
 
-<!-- wp:heading {"level":3} -->
-<h3>Optional but Recommended</h3>
-<!-- /wp:heading -->
+<!-- wp:paragraph -->
+<p><strong>Optional (but recommended):</strong></p>
+<!-- /wp:paragraph -->
 
 <!-- wp:list -->
 <ul>
-<li><strong>AgentGateway (latest)</strong> - For MCP server routing and policy enforcement</li>
-<li><strong>Kagent (latest)</strong> - For agent and MCPServer resources</li>
-<li><strong>Agent Registry (latest)</strong> - For MCPServerCatalog resources</li>
-<li><strong>LLM Provider</strong> - Google Cloud Account with Gemini API or local Ollama</li>
-<li><strong>DNS (optional)</strong> - For accessing dashboard via domain name with Gateway API route</li>
+<li>Google Gemini API key or local Ollama for AI-powered risk analysis</li>
+<li>AgentGateway (for full policy enforcement integration)</li>
 </ul>
 <!-- /wp:list -->
 
 <!-- wp:heading {"level":2} -->
-<h2>Installation Guide</h2>
+<h2>Install in 3 Steps</h2>
 <!-- /wp:heading -->
 
 <!-- wp:heading {"level":3} -->
-<h3>Step 1: Add the MCP-G Helm Repository</h3>
+<h3>Step 1: Add the Helm Chart</h3>
 <!-- /wp:heading -->
 
 <!-- wp:preformatted -->
@@ -435,93 +248,54 @@ helm repo update</pre>
 <!-- /wp:preformatted -->
 
 <!-- wp:heading {"level":3} -->
-<h3>Step 2: Create Namespace</h3>
+<h3>Step 2: Create Namespace and Deploy</h3>
 <!-- /wp:heading -->
 
 <!-- wp:preformatted -->
-<pre>kubectl create namespace mcp-governance</pre>
-<!-- /wp:preformatted -->
+<pre>kubectl create namespace mcp-governance
 
-<!-- wp:heading {"level":3} -->
-<h3>Step 3: Create AI Configuration Secret (Optional)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p>If using Google Gemini:</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:preformatted -->
-<pre>kubectl create secret generic gemini-config \
-  --from-literal=api-key=YOUR_GEMINI_API_KEY \
-  -n mcp-governance</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:paragraph -->
-<p>If using Ollama:</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:preformatted -->
-<pre>kubectl create secret generic ollama-config \
-  --from-literal=endpoint=http://ollama:11434 \
+helm install mcp-governance mcp-governance/mcp-governance \
   -n mcp-governance</pre>
 <!-- /wp:preformatted -->
 
 <!-- wp:heading {"level":3} -->
-<h3>Step 4: Deploy with Helm</h3>
+<h3>Step 3: Access the Dashboard</h3>
 <!-- /wp:heading -->
 
-<!-- wp:paragraph -->
-<p><strong>Quick Start (Development):</strong></p>
-<!-- /wp:paragraph -->
-
 <!-- wp:preformatted -->
-<pre>helm install mcp-governance mcp-governance/mcp-governance \
-  -n mcp-governance \
-  --set environment=dev</pre>
+<pre>kubectl port-forward -n mcp-governance svc/mcp-governance-dashboard 3000:3000</pre>
 <!-- /wp:preformatted -->
 
 <!-- wp:paragraph -->
-<p><strong>Production Deployment:</strong></p>
+<p>Then open <strong>http://localhost:3000</strong> in your browser. That's it! Your MCP servers will be automatically discovered within 30 seconds.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2>What You'll See in the Dashboard</h2>
+<!-- /wp:heading -->
+
+<!-- wp:list -->
+<ul>
+<li><strong>Overview</strong> — Your cluster's security score, letter grade, and trend over time</li>
+<li><strong>MCP Servers</strong> — A list of all discovered servers with their individual scores and security gaps</li>
+<li><strong>Findings</strong> — Specific security issues with clear recommendations for fixes</li>
+<li><strong>Resource Inventory</strong> — All Kubernetes resources related to your MCP infrastructure</li>
+</ul>
+<!-- /wp:list -->
+
+<!-- wp:heading {"level":2} -->
+<h2>Custom Security Policies (Optional)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>You can customize scoring rules by creating a <code>MCPGovernancePolicy</code> in Kubernetes:</p>
 <!-- /wp:paragraph -->
 
 <!-- wp:preformatted -->
-<pre>helm install mcp-governance mcp-governance/mcp-governance \
-  -n mcp-governance \
-  --set environment=prod \
-  --set controller.replicas=3 \
-  --set dashboard.replicas=2 \
-  --set ai.provider=gemini \
-  --set ai.gemini.secretName=gemini-config</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:heading {"level":3} -->
-<h3>Step 5: Verify Deployment</h3>
-<!-- /wp:heading -->
-
-<!-- wp:preformatted -->
-<pre># Check if pods are running
-kubectl get pods -n mcp-governance
-
-# Check logs
-kubectl logs -n mcp-governance deployment/mcp-governance-controller -f
-
-# Access dashboard
-kubectl port-forward -n mcp-governance svc/mcp-governance-dashboard 3000:3000
-
-# Then open http://localhost:3000</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:heading {"level":3} -->
-<h3>Step 6: Create a Governance Policy</h3>
-<!-- /wp:heading -->
-
-<!-- wp:preformatted -->
-<pre>cat &lt;&lt;EOF | kubectl apply -f -
-apiVersion: governance.mcp.io/v1alpha1
+<pre>apiVersion: governance.mcp.io/v1alpha1
 kind: MCPGovernancePolicy
 metadata:
-  name: enterprise-policy
-  namespace: default
+  name: my-policy
 spec:
   enabled: true
   weights:
@@ -536,427 +310,53 @@ spec:
   thresholds:
     minScoreForPassing: 70
     criticalGatewayRequired: true
-    tlsRequired: true
-  aiScoring:
-    enabled: true
-    provider: gemini
-    cacheResults: true
-  verifiedCatalogScoring:
-    enabled: true
-    weights:
-      security: 50
-      trust: 30
-      compliance: 20
-EOF</pre>
+    tlsRequired: true</pre>
 <!-- /wp:preformatted -->
 
-<!-- wp:heading {"level":3} -->
-<h3>Step 7: Verify Governance Policy</h3>
-<!-- /wp:heading -->
-
-<!-- wp:preformatted -->
-<pre>kubectl get mcpgovernancepolicies
-kubectl describe mcpgovernancepolicies enterprise-policy
-kubectl get governanceevaluations -w</pre>
-<!-- /wp:preformatted -->
+<!-- wp:paragraph -->
+<p>Apply it and the controller will immediately start using your custom rules.</p>
+<!-- /wp:paragraph -->
 
 <!-- wp:heading {"level":2} -->
-<h2>Dashboard Overview</h2>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p>Once deployed, access the dashboard at <code>http://localhost:3000</code> (or your configured domain).</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>📊 Overview Tab</h3>
+<h2>Who Should Use MCP-G?</h2>
 <!-- /wp:heading -->
 
 <!-- wp:list -->
 <ul>
-<li><strong>Cluster Score</strong> - Weighted average of all MCP server scores</li>
-<li><strong>Grade</strong> - A–F letter grade</li>
-<li><strong>MCP Servers</strong> - Count of discovered servers</li>
-<li><strong>Average Server Score</strong> - Aggregate security posture</li>
-<li><strong>Critical Findings</strong> - Count of critical-severity issues</li>
-<li><strong>Score Trend</strong> - 7-day trend visualization</li>
+<li><strong>Security Teams</strong> — Audit and enforce MCP security policies across your cluster</li>
+<li><strong>DevOps Teams</strong> — Catch misconfigurations before they reach production</li>
+<li><strong>Compliance Officers</strong> — Get automated reports proving your MCP infrastructure is secure</li>
+<li><strong>AI Developers</strong> — Safely deploy AI agents without worrying about security gaps</li>
 </ul>
 <!-- /wp:list -->
-
-<!-- wp:heading {"level":3} -->
-<h3>🔧 MCP Servers Tab</h3>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li>Table view of all discovered MCP servers with color-coded status</li>
-<li>Details: namespace, gateway routes, authentication method</li>
-<li>Expandable drill-down: Full scoring breakdown, tools exposed, connected agents</li>
-<li>Filter and sort by score, namespace, status</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":3} -->
-<h3>✓ Verified Catalog Tab</h3>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li>List of MCPServerCatalog resources with score and verification status</li>
-<li>Security assessment per governance category</li>
-<li>Check results (pass/fail with points)</li>
-<li>Expandable details: Findings, tools, agent consumers</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":3} -->
-<h3>📦 Resource Inventory Tab</h3>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li>Flat list of all discovered resources</li>
-<li>AgentGateway, Kagent, Gateway API, Governance resources</li>
-<li>Quick status indicators and resource consumption tracking</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":3} -->
-<h3>🚨 All Findings Tab</h3>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li>Complete list of governance findings with severity filtering</li>
-<li>Per-server and per-resource organization</li>
-<li>Remediation guidance for each finding</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":3} -->
-<h3>ℹ️ About MCP-G Tab</h3>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li>Architecture diagram and prerequisites</li>
-<li>Features and scoring system explanation</li>
-<li>Kubernetes resources examples</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":2} -->
-<h2>Configuration: MCPGovernancePolicy CRD</h2>
-<!-- /wp:heading -->
-
-<!-- wp:heading {"level":3} -->
-<h3>Example: Basic Policy</h3>
-<!-- /wp:heading -->
-
-<!-- wp:preformatted -->
-<pre>apiVersion: governance.mcp.io/v1alpha1
-kind: MCPGovernancePolicy
-metadata:
-  name: basic-policy
-spec:
-  enabled: true
-  weights:
-    gatewayRouting: 20
-    authentication: 20
-    authorization: 15
-    tlsEncryption: 15
-    cors: 10
-    rateLimit: 10
-    promptGuard: 10
-    toolScope: 10</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:heading {"level":3} -->
-<h3>Example: Strict Policy (Production)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:preformatted -->
-<pre>apiVersion: governance.mcp.io/v1alpha1
-kind: MCPGovernancePolicy
-metadata:
-  name: strict-policy
-spec:
-  enabled: true
-  weights:
-    gatewayRouting: 20
-    authentication: 20
-    authorization: 15
-    tlsEncryption: 15
-    cors: 10
-    rateLimit: 10
-    promptGuard: 10
-    toolScope: 10
-  thresholds:
-    minScoreForPassing: 85
-    criticalGatewayRequired: true
-    tlsRequired: true
-    authenticationRequired: true
-    rateLimit:
-      enabled: true
-      requestsPerSecond: 10</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:heading {"level":3} -->
-<h3>Example: With AI Scoring</h3>
-<!-- /wp:heading -->
-
-<!-- wp:preformatted -->
-<pre>apiVersion: governance.mcp.io/v1alpha1
-kind: MCPGovernancePolicy
-metadata:
-  name: ai-policy
-spec:
-  enabled: true
-  aiScoring:
-    enabled: true
-    provider: gemini
-    secretName: gemini-config
-    cacheResults: true
-    cacheTTL: 3600
-    model: "gemini-pro"
-  verifiedCatalogScoring:
-    enabled: true
-    weights:
-      security: 50
-      trust: 30
-      compliance: 20
-    thresholds:
-      minScoreForVerified: 80</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:heading {"level":2} -->
-<h2>API Reference</h2>
-<!-- /wp:heading -->
-
-<!-- wp:heading {"level":3} -->
-<h3>Overview Endpoint</h3>
-<!-- /wp:heading -->
-
-<!-- wp:preformatted -->
-<pre>curl http://localhost:8090/api/governance/overview</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:preformatted -->
-<pre>{
-  "clusterScore": 82.5,
-  "grade": "B",
-  "totalMCPServers": 12,
-  "averageServerScore": 78.3,
-  "criticalFindings": 2,
-  "highFindings": 8,
-  "scoreTrend": [75, 76, 78, 80, 81, 82, 82.5]
-}</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:heading {"level":3} -->
-<h3>MCP Servers Endpoint</h3>
-<!-- /wp:heading -->
-
-<!-- wp:preformatted -->
-<pre>curl http://localhost:8090/api/governance/mcp-servers</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:preformatted -->
-<pre>{
-  "servers": [
-    {
-      "name": "grafana-mcp",
-      "namespace": "default",
-      "score": 85,
-      "grade": "B",
-      "scores": {
-        "gatewayRouting": 20,
-        "authentication": 20,
-        "authorization": 15,
-        "tlsEncryption": 12,
-        "cors": 8,
-        "rateLimit": 5,
-        "promptGuard": 3,
-        "toolScope": 2
-      },
-      "gatewayRoutes": ["grafana-route"],
-      "toolsExposed": 12,
-      "agentConsumers": ["agent-1", "agent-2"],
-      "lastEvaluated": "2025-02-21T10:30:00Z"
-    }
-  ]
-}</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:heading {"level":3} -->
-<h3>Findings Endpoint</h3>
-<!-- /wp:heading -->
-
-<!-- wp:preformatted -->
-<pre>curl http://localhost:8090/api/governance/findings</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:preformatted -->
-<pre>{
-  "findings": [
-    {
-      "id": "finding-001",
-      "server": "grafana-mcp",
-      "severity": "High",
-      "category": "Authorization",
-      "title": "Tool Allow-List Not Configured",
-      "description": "No authorization policy restricts tool access",
-      "remediation": "Attach AgentgatewayPolicy with tool allow-list",
-      "pointsLost": 15
-    }
-  ]
-}</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:heading {"level":3} -->
-<h3>Verified Catalog Endpoint</h3>
-<!-- /wp:heading -->
-
-<!-- wp:preformatted -->
-<pre>curl http://localhost:8090/api/governance/inventory/verified</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:preformatted -->
-<pre>{
-  "resources": [
-    {
-      "name": "grafana-mcp",
-      "namespace": "default",
-      "verifiedScore": {
-        "score": 85,
-        "grade": "B",
-        "status": "Verified",
-        "securityScore": 90,
-        "trustScore": 75,
-        "complianceScore": 85
-      }
-    }
-  ]
-}</pre>
-<!-- /wp:preformatted -->
-
-<!-- wp:heading {"level":2} -->
-<h2>Use Cases</h2>
-<!-- /wp:heading -->
-
-<!-- wp:heading {"level":3} -->
-<h3>1. Enterprise Security Compliance</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p>Ensure all MCP servers meet compliance standards (SOC 2, ISO 27001, etc.) with automated scoring and audit trails.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>2. Multi-Tenant Isolation</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p>Validate that each tenant's MCP servers are properly isolated with gateway routing and RBAC policies.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>3. AI Agent Risk Assessment</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p>Before deploying a new AI agent to production, evaluate which MCP servers it can access and their security posture.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>4. Incident Response</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p>When a security incident occurs, quickly identify which agents accessed which tools via the findings tab and audit logs.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>5. Continuous Governance</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p>Maintain security posture as new MCP servers are deployed — automatic discovery and evaluation prevent configuration drift.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":3} -->
-<h3>6. Vendor Risk Management</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p>Evaluate third-party MCP server catalogs before integrating them — Verified Catalog scoring ensures only trustworthy sources are used.</p>
-<!-- /wp:paragraph -->
 
 <!-- wp:heading {"level":2} -->
 <h2>Troubleshooting</h2>
 <!-- /wp:heading -->
 
 <!-- wp:heading {"level":3} -->
-<h3>Controller Not Discovering Resources</h3>
+<h3>Dashboard shows no MCP servers?</h3>
 <!-- /wp:heading -->
 
 <!-- wp:paragraph -->
-<p><strong>Symptom:</strong> Dashboard shows 0 MCP servers found</p>
+<p>Check the controller logs: <code>kubectl logs deployment/mcp-governance-controller -n mcp-governance -f</code></p>
 <!-- /wp:paragraph -->
 
 <!-- wp:paragraph -->
-<p><strong>Solution:</strong></p>
+<p>The controller needs RBAC permissions to discover resources. Verify it can list MCP resources: <code>kubectl auth can-i list mcpservers --as=system:serviceaccount:mcp-governance:controller</code></p>
 <!-- /wp:paragraph -->
-
-<!-- wp:list {"ordered":true} -->
-<ol>
-<li>Check controller logs: <code>kubectl logs deployment/mcp-governance-controller -f</code></li>
-<li>Verify Kubernetes API connectivity: <code>kubectl auth can-i list mcpservers --as=system:serviceaccount:mcp-governance:controller</code></li>
-<li>Ensure Kagent, AgentGateway, and Governance CRDs are installed</li>
-</ol>
-<!-- /wp:list -->
 
 <!-- wp:heading {"level":3} -->
-<h3>Dashboard Not Updating</h3>
+<h3>Dashboard not updating?</h3>
 <!-- /wp:heading -->
 
 <!-- wp:paragraph -->
-<p><strong>Symptom:</strong> Dashboard shows stale data</p>
+<p>Check if the API is reachable: <code>curl http://localhost:8090/api/governance/overview</code></p>
 <!-- /wp:paragraph -->
 
 <!-- wp:paragraph -->
-<p><strong>Solution:</strong></p>
+<p>Also check dashboard logs: <code>kubectl logs deployment/mcp-governance-dashboard -n mcp-governance -f</code></p>
 <!-- /wp:paragraph -->
-
-<!-- wp:list {"ordered":true} -->
-<ol>
-<li>Check dashboard logs: <code>kubectl logs deployment/mcp-governance-dashboard -f</code></li>
-<li>Verify API endpoint is reachable: <code>curl http://localhost:8090/api/governance/overview</code></li>
-<li>Check browser console for network errors</li>
-<li>Refresh browser and check API polling (Network tab)</li>
-</ol>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":3} -->
-<h3>AI Scoring Errors</h3>
-<!-- /wp:heading -->
-
-<!-- wp:paragraph -->
-<p><strong>Symptom:</strong> "Failed to score with AI agent" errors</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:paragraph -->
-<p><strong>Solution:</strong></p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list {"ordered":true} -->
-<ol>
-<li>Verify secret is created: <code>kubectl get secret gemini-config -n mcp-governance</code></li>
-<li>Test API key with Gemini API endpoint</li>
-<li>Check controller logs for LLM errors</li>
-<li>Disable AI scoring temporarily: Set <code>aiScoring.enabled: false</code> in policy</li>
-</ol>
-<!-- /wp:list -->
 
 <!-- wp:heading {"level":2} -->
 <h2>Best Practices</h2>
@@ -964,107 +364,54 @@ spec:
 
 <!-- wp:list {"ordered":true} -->
 <ol>
-<li><strong>Start with Discovery</strong> - Deploy MCP-G first to discover current MCP infrastructure without enforcing policies</li>
-<li><strong>Establish Baseline</strong> - Review initial findings and scoring to understand current security posture</li>
-<li><strong>Gradual Hardening</strong> - Incrementally increase policy strictness over 5 weeks (discovery → soft enforcement → gateway → auth → TLS)</li>
-<li><strong>Regular Policy Reviews</strong> - Review MCPGovernancePolicy quarterly to align with evolving security needs</li>
-<li><strong>Use AI for Risk Analysis</strong> - Enable AI scoring for deeper insights beyond algorithmic scoring</li>
-<li><strong>Monitor Trends</strong> - Watch score trends over time to identify security gaps or improvements</li>
-<li><strong>Automate Remediation</strong> - Integrate findings with incident management systems for automated workflows</li>
-<li><strong>Document Exceptions</strong> - When servers can't meet requirements, document the exception and remediation timeline</li>
+<li><strong>Start with discovery</strong> — Deploy MCP-G and review baseline findings before enforcing policies</li>
+<li><strong>Fix critical issues first</strong> — Focus on getting missing authentication and encryption in place</li>
+<li><strong>Gradually tighten policies</strong> — Start permissive, then gradually require stronger security controls</li>
+<li><strong>Monitor score trends</strong> — A declining score means new security gaps are being introduced</li>
+<li><strong>Use AI insights</strong> — Enable AI analysis to get smarter recommendations, not just rule-based scores</li>
+<li><strong>Review quarterly</strong> — As your infrastructure grows, update your governance policies</li>
 </ol>
 <!-- /wp:list -->
 
 <!-- wp:heading {"level":2} -->
-<h2>Roadmap</h2>
+<h2>What's Coming Next?</h2>
 <!-- /wp:heading -->
 
-<!-- wp:heading {"level":3} -->
-<h3>Current (v0.17.0)</h3>
-<!-- /wp:heading -->
+<!-- wp:paragraph -->
+<p>Currently MCP-G is at v0.18.0 with auto-discovery, security scoring, and AI analysis. Planned for v1.0:</p>
+<!-- /wp:paragraph -->
 
 <!-- wp:list -->
 <ul>
-<li>✅ 9 resource type discovery</li>
-<li>✅ 8-category scoring system</li>
-<li>✅ AI-powered risk analysis (Gemini + Ollama)</li>
-<li>✅ Verified catalog scoring</li>
-<li>✅ REST API endpoints</li>
-<li>✅ Real-time dashboard with 6 tabs</li>
-<li>✅ MCPGovernancePolicy CRD</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:heading {"level":3} -->
-<h3>Upcoming (v1.0.0)</h3>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li>🔄 Soft policy enforcement (warnings → errors)</li>
-<li>🔄 Automated remediation suggestions with one-click apply</li>
-<li>🔄 Compliance reports (SOC 2, ISO 27001, PCI-DSS)</li>
-<li>🔄 Audit logging and forensics</li>
-<li>🔄 Multi-cluster governance federation</li>
-<li>🔄 Custom scoring extensions (plugins)</li>
-<li>🔄 Webhook-based event notifications</li>
+<li>Policy enforcement (block insecure servers automatically)</li>
+<li>Automated remediation (one-click fixes)</li>
+<li>Compliance reports (SOC 2, ISO 27001, PCI-DSS)</li>
+<li>Multi-cluster governance</li>
+<li>Webhook notifications</li>
 </ul>
 <!-- /wp:list -->
 
 <!-- wp:heading {"level":2} -->
-<h2>Conclusion</h2>
+<h2>Get Started Today</h2>
 <!-- /wp:heading -->
 
 <!-- wp:paragraph -->
-<p>MCP Governance brings enterprise-grade security to Model Context Protocol infrastructure in Kubernetes. By combining automated discovery, multi-category scoring, and optional AI-powered risk analysis, MCP-G gives you visibility and control over your MCP ecosystem.</p>
+<p>MCP Governance makes securing your MCP infrastructure simple. You get automated discovery, security scoring, and actionable findings — all without complex setup.</p>
 <!-- /wp:paragraph -->
 
 <!-- wp:paragraph -->
-<p>Whether you're running a few MCP servers or managing a multi-tenant infrastructure, MCP-G helps you:</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:list -->
-<ul>
-<li>Discover and inventory all MCP resources</li>
-<li>Evaluate security posture across 8 categories</li>
-<li>Identify and remediate vulnerabilities</li>
-<li>Maintain continuous compliance</li>
-<li>Scale governance with your organization</li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:paragraph -->
-<p><strong>Get started today:</strong></p>
+<p><strong>Ready to secure your MCP servers?</strong></p>
 <!-- /wp:paragraph -->
 
 <!-- wp:list {"ordered":true} -->
 <ol>
-<li>Clone the repository: <code>git clone https://github.com/techwithhuz/mcp-security-governance</code></li>
-<li>Deploy to your cluster: <code>helm install mcp-governance ./charts/mcp-governance</code></li>
-<li>Access the dashboard and review your MCP security posture</li>
+<li>Clone the repository: <code>git clone https://github.com/techwithhuz/mcp-g</code></li>
+<li>Deploy with Helm: <code>helm install mcp-governance ./charts/mcp-governance</code></li>
+<li>Open the dashboard at <code>http://localhost:3000</code></li>
+<li>Review your MCP security posture and fix critical issues</li>
 </ol>
 <!-- /wp:list -->
 
 <!-- wp:paragraph -->
-<p>For questions, issues, or contributions, visit <a href="https://github.com/techwithhuz/mcp-security-governance">GitHub</a>.</p>
-<!-- /wp:paragraph -->
-
-<!-- wp:heading {"level":2} -->
-<h2>Additional Resources</h2>
-<!-- /wp:heading -->
-
-<!-- wp:list -->
-<ul>
-<li><strong>GitHub Repository:</strong> <a href="https://github.com/techwithhuz/mcp-security-governance">techwithhuz/mcp-security-governance</a></li>
-<li><strong>Helm Chart:</strong> <code>charts/mcp-governance</code></li>
-<li><strong>CRD Documentation:</strong> <code>charts/mcp-governance/crds/</code></li>
-<li><strong>API Documentation:</strong> See API Reference section above</li>
-<li><strong>AgentGateway:</strong> <a href="https://agentgateway.dev">agentgateway.dev</a></li>
-<li><strong>Kagent:</strong> <a href="https://kagent.dev">kagent.dev</a></li>
-<li><strong>Model Context Protocol:</strong> <a href="https://modelcontextprotocol.io">modelcontextprotocol.io</a></li>
-</ul>
-<!-- /wp:list -->
-
-<!-- wp:paragraph -->
-<p><strong>Author:</strong> Tech With Huz<br><strong>Last Updated:</strong> February 2025<br><strong>License:</strong> MIT</p>
+<p><strong>Questions?</strong> Open an issue on <a href="https://github.com/techwithhuz/mcp-g">GitHub</a>. Contributions welcome!</p>
 <!-- /wp:paragraph -->
