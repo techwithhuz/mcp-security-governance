@@ -283,6 +283,11 @@ func correlateMCPServer(view *MCPServerView, state *ClusterState, findings []Fin
 					related = true
 				}
 			}
+			for _, rb := range view.RelatedBackends {
+				if tr.Kind == "AgentgatewayBackend" && tr.Name == rb.Name && trNS == rb.Namespace {
+					related = true
+				}
+			}
 		}
 		// If no target refs, assume cluster-wide policy
 		if len(p.TargetRefs) == 0 {
