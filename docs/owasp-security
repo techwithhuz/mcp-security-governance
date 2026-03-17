@@ -1,0 +1,97 @@
+# OWASP MCP Security Checklist vs. Your Project
+
+---
+
+## 🔴 Pillar 1 — Strong Identity, Auth & Policy Enforcement
+
+| # | OWASP Requirement | Your Project | Status | Notes |
+|---|---|---|---|---|
+| 1.1 | All remote MCP servers use OAuth 2.1 / OIDC | AgentgatewayPolicy enforces `traffic.jwtAuthentication` with Strict/Optional/Permissive modes; JWT validated with inline JWKS | ⚠️ Partial | JWT/JWKS is implemented but no explicit OAuth 2.1 validation — `iss`, `aud` enforced, but `exp` TTL not policy-mandated in MCPGovernancePolicy |
+| 1.2 | Tokens are short-lived, scoped, validated on every call | `audiences` per-route enforced; JWT Strict mode validated per-call in `checkAuthentication()` | ⚠️ Partial | No `tokenTTLMaxSeconds` field in MCPGovernancePolicy; no `exp` validation in evaluator |
+| 1.3 | No token passthrough; policy enforcement is centralized | All auth enforced at AgentGateway layer; tokens not forwarded to backends (`backend.mcp.authorization` separate from traffic auth) | ✅ Compliant | Excellent — gateway-only enforcement, no passthrough to LLM |
+
+**Pillar Score: 75%**
+
+---
+
+## 🔴 Pillar 2 — Strict Isolation & Lifecycle Control
+
+| # | OWASP Requirement | Your Project | Status | Notes |
+|---|---|---|---|---|
+| 2.1 | Users, sessions, and execution contexts are fully isolated | JWT `sub`/`audience` per agent; rate limits per route | ✅ Compliant | Session identity tied to JWT claims |
+| 2.2 | No shared state for user data | Controller is stateless; RWMutex for snapshot reads | ✅ Compliant | No global user state |
+| 2.3 | Sessions have deterministic cleanup and enforced resource quotas | Rate limits configured (200/min RO, 60/min RW); resource limits in deployments | ❌ Gap | No explicit session lifecycle management (TTL-based flush of handles, tokens, in-memory context). Relies on token expiry only. No Per-Session Resource Quotas in MCPGovernancePolicy. |
+| 2.4 | Network segmentation / NetworkPolicies | Nothing in k8s | ❌ Critical Gap | No NetworkPolicy anywhere — pods can reach any endpoint in cluster |
+| 2.5 | Non-root container / compute isolation | Dockerfile has no `USER` directive; deployment has no `securityContext` | ❌ Critical Gap | Container runs as root |
+
+**Pillar Score: 40%**
+
+---
+
+## 🟡 Pillar 3 — Trusted, Controlled Tooling
+
+| # | OWASP Requirement | Your Project | Status | Notes |
+|---|---|---|---|---|
+| 3.1 | Tools are cryptographically signed, version-pinned, formally approved | CEL allow-lists (`mcp.tool.name in [...]`) enforced via AgentgatewayPolicy; MCPServerCatalog used for discovery | ❌ Gap | No SHA256 hash field in catalog; no signed manifests; no formal approval workflow logged as audit event |
+| 3.2 | Tool descriptions validated against runtime behavior | `checkExposure()` flags unrestricted access; `checkToolCount()` enforces thresholds | ⚠️ Partial | Behavioral consistency check absent — no mechanism to verify description matches actual code behavior |
+| 3.3 | Only minimal, necessary tool fields exposed to model | CEL-based allow-lists restrict to named tools only (e.g., 10 tools for RO path, 10 for RW) | ✅ Compliant | Tool-level filtering via CEL is strong |
+
+**Pillar Score: 55%**
+
+---
+
+## ✅ Pillar 4 — Schema-Driven Validation Everywhere
+
+| # | OWASP Requirement | Your Project | Status | Notes |
+|---|---|---|---|---|
+| 4.1 | All MCP messages, tool inputs, and outputs are schema-validated | All CRDs have OpenAPI v3 schemas; AgentgatewayPolicy fields fully typed | ✅ Compliant | Excellent |
+| 4.2 | Inputs/outputs are sanitized, size-limited, and treated as untrusted | Prompt Guard (`backend.ai.promptGuard`) with regex + builtins (SSN, Credit Card, Email, PhoneNumber); CEL expressions validated | ⚠️ Partial | No `maxRequestSizeBytes` / `maxResponseSizeBytes` in MCPGovernancePolicy; output schema validation is opaque JSON |
+| 4.3 | Structured (JSON) tool invocation is required | MCP spec requires JSON-RPC; no raw command injection possible; CEL tool allow-lists enforce structured call | ✅ Compliant | Strong |
+
+**Pillar Score: 80%**
+
+---
+
+## 🔴 Pillar 5 — Hardened Deployment & Continuous Oversight
+
+| # | OWASP Requirement | Your Project | Status | Notes |
+|---|---|---|---|---|
+| 5.1 | Server runs containerized, non-root, network-restricted | Container: Alpine 3.19 ✅, but no `USER` directive ❌, no `readOnlyRootFilesystem` ❌, no NetworkPolicy ❌ | ❌ Critical Gap | 3 sub-requirements failing |
+| 5.2 | Secrets stored in vaults, never exposed to LLM | `GOOGLE_API_KEY` from K8s Secret (partial); no Vault/AWS SM integration. Secrets not passed to AI agent ✅ | ⚠️ Partial | K8s Secret is better than plaintext but not a proper vault. Secrets never reach LLM context ✅ |
+| 5.3 | CI/CD security gates, audit logs, and continuous monitoring are mandatory | Makefile exists but no Trivy/Gosec targets; no audit logging in evaluator; dashboard provides continuous monitoring ✅ | ❌ Gap | No SAST/SCA in CI; no structured audit logging for governance events |
+
+**Pillar Score: 30%**
+
+---
+
+## 📊 Master Compliance Summary Table
+
+| Pillar | OWASP Requirement | Status | Score |
+|---|---|---|---|
+| 1. Identity & Auth | OAuth 2.1/OIDC, short-lived scoped tokens, no passthrough | ⚠️ Partial | 75% |
+| 2. Isolation | Full session isolation, no shared state, deterministic cleanup, NetworkPolicy | ❌ Critical Gaps | 40% |
+| 3. Tooling | Signed manifests, version-pinned, behavior-validated, minimal exposure | ⚠️ Partial | 55% |
+| 4. Validation | Schema-validated I/O, sanitized, size-limited, structured invocation | ✅ Strong | 80% |
+| 5. Hardening | Non-root container, vault secrets, CI/CD gates, audit logs, monitoring | ❌ Critical Gaps | 30% |
+| **Overall** | | 🔴 | **56%** |
+
+---
+
+## 🎯 Top Priority Fixes (from the PDF checklist)
+
+| Priority | Fix | File | Effort |
+|---|---|---|---|
+| 🔴 P1 | Add non-root user to Dockerfile | `Dockerfile` | 30 min |
+| 🔴 P1 | Add `securityContext` + `readOnlyRootFilesystem` to all pods | `deployment.yaml` | 30 min |
+| 🔴 P1 | Create NetworkPolicy for controller & dashboard | `deploy/k8s/network-policy.yaml` (new) | 1 hr |
+| 🔴 P1 | Add structured audit logging (`AuditEvent` type) | `controller/pkg/evaluator/auditor.go` (new) | 3 hrs |
+| 🟠 P2 | Add Trivy + Gosec targets to Makefile | `Makefile` | 30 min |
+| 🟠 P2 | Add `tokenTTLMaxSeconds` field to MCPGovernancePolicy | `types.go` | 1 hr |
+| 🟠 P2 | Add `sha256Hash` field to MCPServerCatalog tool entries | CRD types | 2 hrs |
+| 🟡 P3 | Vault integration (replace K8s Secret) | `deployment.yaml` | 4 hrs |
+| 🟡 P3 | Add `maxRequestSizeBytes` to policy spec | `types.go` + `evaluator.go` | 2 hrs |
+
+---
+
+> **Bottom line:** Your project has an excellent foundation — the AgentGateway enforcement layer, CEL-based policies, prompt guard, and CRD scoring engine are ahead of most MCP deployments. The critical gaps are almost entirely in the deployment hardening (Pillar 2 & 5): non-root containers, NetworkPolicies, and audit logging. These are fast wins (1–2 days of work) that would push your score from **56% → 85%+**.
+
