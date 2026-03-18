@@ -69,22 +69,49 @@
 
 ---
 
-## What Must Be Built to Pass the Minimum Bar
+## OWASP Alignment Overview
 
-Listed in priority order:
+The mcp-security-governance project aligns with the OWASP MCP Security Guide v1.0 by providing a Kubernetes-native governance controller that continuously evaluates MCP server deployments against a defined security policy. The project adopts the OWASP recommendation of centralising policy enforcement at a single control plane layer, using agentgateway as the enforcement point for all MCP traffic. Compliance findings are scored, categorised by pillar, and surfaced through a per-server breakdown, giving operators a continuous view of their security posture.
 
-| Priority | Item | Pillar | Effort |
-|:---:|---|:---:|:---:|
-| 🔴 1 | Implement `discoverWorkloads()` in `discovery.go` — read `securityContext` from Deployments/StatefulSets | 5 | Medium |
-| 🔴 2 | Implement `checkHardenedDeployment()` in `evaluator.go` — non-root, read-only FS, no priv escalation, cap drop | 5 | Medium |
-| 🔴 3 | Implement `discoverNetworkPolicies()` in `discovery.go` — check NetworkPolicy exists in MCP namespaces | 5 | Small |
-| 🔴 4 | Build `auditor.go` — emit audit records for tool invocations, auth events, and config changes | 5 | Large |
-| 🟠 5 | Add plaintext secret env var check — flag `value:` env vars with names matching `TOKEN/KEY/SECRET/PASSWORD` | 5 | Small |
-| 🟠 6 | Add vault annotation check — inspect `vault.hashicorp.com/agent-inject` on pods | 5 | Small |
-| 🟠 7 | Add `tokenTTL` / `scopes` fields to `AgentgatewayPolicyResource` and check in `checkAuthentication()` | 1 | Medium |
-| 🟡 8 | Add SIEM/webhook export — emit findings to Prometheus, OpenTelemetry, or HTTP webhook sink | 5 | Large |
-| 🟡 9 | Add `SHA256` / `Signature` field to `MCPServerCatalog` CRD and verify in `inventory/scorer.go` | 3 | Large |
-| 🟡 10 | Add `maxRequestSize` / `maxResponseSize` to policy and check in `checkRateLimit()` or new `checkInputLimits()` | 4 | Medium |
+---
+
+## What This Project Does Well
+
+What This Project Does Well ✅
+Centralized enforcement architecture — agentgateway as the MCP control plane exactly matches OWASP's "Centralize Policy Enforcement" requirement (Ch 5)
+JWT/OIDC authentication detection — catches missing, Optional/Permissive, and absent JWT policies (AUTH-001, AUTH-002)
+RBAC / tool-level access control — CEL-based matchExpressions checked per MCP target (RBAC-001, RBAC-100)
+TLS enforcement — backend TLS checked per AgentgatewayBackend (TLS-001, TLS-002)
+CORS + CSRF protection — both detected in policies and HTTPRoutes (CORS-001, CORS-002, CORS-003)
+Tool scope limits — configurable warning/critical thresholds for tool count (TOOLS-001)
+Exposure detection — RemoteMCPServer URLs validated to route through agentgateway (EXP-001)
+Per-server scoring — MCP-server-centric views with individual ScoreBreakdown across 8 categories
+VerifiedCatalog scorer — publisher source, transport security, versioning, deployment health checks
+Continuous scanning — Kubernetes reconcile loop provides ongoing policy evaluation
+
+---
+
+## What Needs to Be Built
+
+1. Hardened Deployment Check — A runtime evaluation module must inspect each MCP workload's security posture, verifying non-root execution, read-only root filesystem, no privilege escalation, and capability drops.
+
+2. Workload Discovery — The discovery layer must be extended to enumerate Deployments and StatefulSets and extract their pod-level security context fields for evaluation.
+
+3. Network Policy Discovery — The discovery layer must enumerate NetworkPolicy resources and verify that each MCP workload namespace has ingress and egress restrictions defined.
+
+4. Audit Logging Pipeline — A dedicated audit module must capture and persist structured records for every tool invocation, authentication event, and governance configuration change.
+
+5. Token Lifetime and Scope Validation — The gateway policy resource must be extended to capture token expiry and scope constraints, which are then validated at evaluation time against each active policy.
+
+6. Vault and Secret Store Detection — Pod annotations must be inspected to confirm secrets are injected via an approved secret management solution such as Vault agent injection or External Secrets Operator, rather than hardcoded environment variables.
+
+7. Image Signature Verification — Discovered pod images must be checked for cryptographic signing annotations to confirm provenance and tamper-evidence before a workload is considered compliant.
+
+8. SIEM and Alerting Export — Governance findings and audit events must be forwarded to an external observability system via webhook, Prometheus metrics, or OpenTelemetry export.
+
+9. Service Account RBAC Audit — ServiceAccount bindings attached to MCP workloads must be inspected to detect over-privileged non-human identities that violate least-privilege principles.
+
+10. Hardening Score Integration — The hardened deployment score must be incorporated into the overall compliance scoring pipeline so that hardening posture is reflected in per-server scores and aggregate cluster reports.
 
 ---
 
