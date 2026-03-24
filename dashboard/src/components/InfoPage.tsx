@@ -12,6 +12,17 @@ import {
 
 const SCORING_CONTROLS = [
   {
+    key: 'Hardened Deployment',
+    icon: ShieldAlert,
+    color: '#059669',
+    maxScore: 15,
+    description: 'Does the MCP server Deployment enforce OWASP Tier 1 container security (runAsNonRoot, read-only FS, no privilege escalation, etc.)?',
+    pass: '10+ OWASP hardening checks passed (+15)',
+    fail: 'Deployment missing hardening controls; running as root or with privilege escalation (0)',
+    partial: '5–9 checks passed (+8)',
+    why: 'Container hardening prevents privilege escalation, data exfiltration, and lateral movement if the MCP server code is compromised. OWASP Tier 1 is the baseline for production AI infrastructure.',
+  },
+  {
     key: 'Gateway Routing',
     icon: Route,
     color: '#3b82f6',
@@ -160,7 +171,7 @@ const HOW_IT_WORKS = [
     title: 'Security Evaluation',
     icon: ShieldAlert,
     color: '#8b5cf6',
-    description: 'Each MCP server is evaluated across 8 security controls. Scores are calculated using weighted rubrics. Findings are generated for each failing control with specific remediation guidance.',
+    description: 'Each MCP server is evaluated across 9 governance categories. Scores are calculated using weighted rubrics. Findings are generated for each failing control with specific remediation guidance.',
   },
   {
     step: '04',
