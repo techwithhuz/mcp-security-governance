@@ -47,6 +47,7 @@ type MCPServerView struct {
 	HasCORS              bool   `json:"hasCORS"`
 	HasRateLimit         bool   `json:"hasRateLimit"`
 	HasPromptGuard       bool   `json:"hasPromptGuard"`
+	HasWorkload          bool   `json:"hasWorkload"` // true if a Deployment/StatefulSet backing this MCP server was discovered
 
 	// Scoring
 	Score             int                      `json:"score"`
@@ -536,6 +537,31 @@ func correlateMCPServer(view *MCPServerView, state *ClusterState, findings []Fin
 	// Ensure nil slices become empty arrays in JSON
 	ensureNonNilSlices(view)
 
+	// --- Check if a backing workload (Deployment/StatefulSet) exists for this MCP server ---
+	// For KagentMCPServers, the workload is expected to share the same name and namespace.
+	// For RemoteMCPServers, we match by the deployment name extracted from the URL.
+	for _, w := range state.Workloads {
+		if w.Name == view.Name && w.Namespace == view.Namespace {
+			view.HasWorkload = true
+			break
+		}
+		// Also match by deployment name derived from a RemoteMCPServer URL
+		if view.Source == "KagentRemoteMCPServer" && view.URL != "" {
+			if parts := strings.Split(view.URL, "://"); len(parts) > 1 {
+				hostPort := parts[1]
+				if p := strings.Split(hostPort, "/"); len(p) > 0 {
+					hostPort = p[0]
+				}
+				if p := strings.Split(hostPort, "."); len(p) > 0 {
+					if w.Name == p[0] {
+						view.HasWorkload = true
+						break
+					}
+				}
+			}
+		}
+	}
+
 	// --- Collect findings for this MCP server ---
 	view.Findings = collectMCPServerFindings(view, findings)
 	if view.Findings == nil {
@@ -675,7 +701,7 @@ func isClusterWideFinding(f Finding) bool {
 	switch f.ID {
 	case "AGW-001", "AGW-003", "AGW-004", "AUTH-002", "CORS-001", "CORS-002",
 		"CORS-003", "RL-001", "RL-002", "RBAC-001", "RBAC-002", "PG-001", "PG-002",
-		"TLS-002":
+		"TLS-002", "HDN-000":
 		return true
 	}
 	return false
@@ -774,25 +800,46 @@ func scoreMCPServer(view *MCPServerView, policy Policy) {
 
 	// Hardening Score — derived from HDN-* findings for this server's namespace/name
 	if policy.RequireHardenedDeployment {
-		bd.HardeningScore = 100
-		hdnPenalty := 0
-		for _, f := range view.Findings {
-			if f.Category == CategoryHardening {
-				switch f.Severity {
-				case SeverityCritical:
-					hdnPenalty += 40
-				case SeverityHigh:
-					hdnPenalty += 25
-				case SeverityMedium:
-					hdnPenalty += 15
-				case SeverityLow:
-					hdnPenalty += 5
+		// Only check for a backing workload for local (KagentMCPServer) resources.
+		// Remote MCP servers run outside the cluster; their workloads are not discoverable here.
+		isRemote := view.Source == "KagentRemoteMCPServer"
+		// If no backing workload exists for this specific local MCP server, score is 0.
+		// This handles the case where the cluster has other workloads (so HDN-000 is not
+		// emitted cluster-wide) but this particular MCP server has no Deployment/StatefulSet.
+		if !isRemote && !view.HasWorkload {
+			bd.HardeningScore = 0
+			view.Findings = append(view.Findings, Finding{
+				ID:          fmt.Sprintf("HDN-000-%s", view.Name),
+				Severity:    SeverityHigh,
+				Category:    CategoryHardening,
+				Title:       fmt.Sprintf("No workload found for MCP server '%s'", view.Name),
+				Description: fmt.Sprintf("No Deployment or StatefulSet named '%s' was discovered in namespace '%s'. Hardening checks require a backing workload to evaluate container security posture.", view.Name, view.Namespace),
+				Impact:      "Container security posture cannot be assessed. The MCP server may not be deployed or may be using a different resource name.",
+				Remediation: fmt.Sprintf("Deploy the MCP server as a Deployment or StatefulSet named '%s' in namespace '%s', or verify the workload is in an evaluated namespace.", view.Name, view.Namespace),
+				ResourceRef: view.ID,
+				Namespace:   view.Namespace,
+			})
+		} else {
+			bd.HardeningScore = 100
+			hdnPenalty := 0
+			for _, f := range view.Findings {
+				if f.Category == CategoryHardening {
+					switch f.Severity {
+					case SeverityCritical:
+						hdnPenalty += 40
+					case SeverityHigh:
+						hdnPenalty += 25
+					case SeverityMedium:
+						hdnPenalty += 15
+					case SeverityLow:
+						hdnPenalty += 5
+					}
 				}
 			}
-		}
-		bd.HardeningScore -= hdnPenalty
-		if bd.HardeningScore < 0 {
-			bd.HardeningScore = 0
+			bd.HardeningScore -= hdnPenalty
+			if bd.HardeningScore < 0 {
+				bd.HardeningScore = 0
+			}
 		}
 	}
 

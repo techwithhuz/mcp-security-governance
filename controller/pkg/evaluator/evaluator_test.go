@@ -57,6 +57,29 @@ func fullCompliantState() *ClusterState {
 		Services: []ServiceResource{
 			{Name: "agentgateway", Namespace: "agentgateway-system", Ports: []int{8080}},
 		},
+		Workloads: []WorkloadResource{
+			{
+				Name:                          "my-mcp",
+				Namespace:                     "mcp-system",
+				Kind:                          "Deployment",
+				AllContainersNonRoot:          true,
+				AllContainersReadOnlyRootFS:   true,
+				AllContainersNoPrivEscalation: true,
+				AllContainersCapDropAll:       true,
+				SeccompProfileSet:             true,
+				HasLatestTag:                  false,
+				HasPlaintextEnvSecrets:        false,
+				HasImageSignature:             true,
+			},
+		},
+		NetworkPolicies: []NetworkPolicyResource{
+			{
+				Name:            "default-deny",
+				Namespace:       "mcp-system",
+				HasIngressRules: true,
+				HasEgressRules:  true,
+			},
+		},
 	}
 }
 
