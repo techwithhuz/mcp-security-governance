@@ -106,6 +106,8 @@ spec:
                       type: integer
                     rateLimitScore:
                       type: integer
+                    hardenedDeploymentScore:
+                      type: integer
                 namespaceScores:
                   type: array
                   items:
@@ -205,6 +207,8 @@ spec:
                           promptGuard:
                             type: integer
                           toolScope:
+                            type: integer
+                          hardenedDeployment:
                             type: integer
                       toolCount:
                         type: integer

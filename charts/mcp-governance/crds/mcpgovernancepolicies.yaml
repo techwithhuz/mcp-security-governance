@@ -43,6 +43,10 @@ spec:
                   type: boolean
                   default: false
                   description: "Enforces rate limiting on MCP endpoints"
+                requireHardenedDeployment:
+                  type: boolean
+                  default: true
+                  description: "Enforces container security context, NetworkPolicy coverage, and image hygiene checks"
                 maxToolsWarning:
                   type: integer
                   default: 10
@@ -78,6 +82,9 @@ spec:
                     toolScope:
                       type: integer
                       default: 5
+                    hardenedDeployment:
+                      type: integer
+                      default: 15
                 severityPenalties:
                   type: object
                   description: "Point deductions per finding severity level"
@@ -139,10 +146,6 @@ spec:
                       type: boolean
                       default: true
                       description: "Whether periodic AI scanning is active. Set to false to only allow manual triggers."
-                scanInterval:
-                  type: string
-                  default: "5m"
-                  description: "Interval between governance scans (e.g. '30s', '5m', '10m', '1h'). Default: '5m'"
                 verifiedCatalogScoring:
                   type: object
                   description: "Scoring configuration for Verified Catalog (MCPServerCatalog inventory). All fields optional — omitted values use built-in defaults."
