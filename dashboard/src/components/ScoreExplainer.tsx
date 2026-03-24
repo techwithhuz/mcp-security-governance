@@ -46,6 +46,7 @@ const categoryToFindingCategory: Record<string, string[]> = {
   'Prompt Guard': ['PromptGuard'],
   'Rate Limit': ['RateLimit'],
   'Tool Scope': ['ToolScope'],
+  'Hardened Deployment': ['Hardening'],
 };
 
 const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; bg: string; border: string }> = {

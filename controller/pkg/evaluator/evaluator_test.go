@@ -98,7 +98,7 @@ func TestDefaultPolicy(t *testing.T) {
 	// Weights should sum to 100
 	w := p.Weights
 	total := w.AgentGatewayIntegration + w.Authentication + w.Authorization +
-		w.CORSPolicy + w.TLSEncryption + w.PromptGuard + w.RateLimit + w.ToolScope
+		w.CORSPolicy + w.TLSEncryption + w.PromptGuard + w.RateLimit + w.ToolScope + w.HardenedDeployment
 	if total != 100 {
 		t.Errorf("Default weights sum to %d, want 100", total)
 	}

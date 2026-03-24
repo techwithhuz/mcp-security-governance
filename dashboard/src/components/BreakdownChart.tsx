@@ -15,6 +15,7 @@ const allCategories = [
   { key: 'promptGuardScore', label: 'Prompt Guard', shortLabel: 'PG' },
   { key: 'rateLimitScore', label: 'Rate Limit', shortLabel: 'RL' },
   { key: 'toolScopeScore', label: 'Tool Scope', shortLabel: 'Tools' },
+  { key: 'hardeningScore', label: 'Hardened Deployment', shortLabel: 'HDN' },
 ];
 
 const getBarColor = (score: number) => {

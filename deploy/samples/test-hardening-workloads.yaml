@@ -1,0 +1,188 @@
+---
+# Non-hardened deployment - violates all HDN checks
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-hardening
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vulnerable-app
+  namespace: test-hardening
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vulnerable-app
+  template:
+    metadata:
+      labels:
+        app: vulnerable-app
+      annotations:
+        test: "vulnerable"
+    spec:
+      # No pod-level security context - defaults to root
+      containers:
+      - name: app
+        image: nginx:latest  # HDN-006: :latest tag
+        ports:
+        - containerPort: 80
+        securityContext:
+          # HDN-001: Running as root (no runAsNonRoot)
+          # HDN-002: Root filesystem is writable (no readOnlyRootFilesystem)
+          # HDN-003: Privilege escalation allowed (no allowPrivilegeEscalation: false)
+          # HDN-004: Capabilities not dropped (no drop: ["ALL"])
+          capabilities:
+            add:
+            - SETUID
+            - SETGID
+            - SYS_ADMIN
+          # HDN-005: No seccomp profile specified
+        env:
+        # HDN-008: Plaintext secret environment variables
+        - name: DATABASE_PASSWORD
+          value: "my-super-secret-password"
+        - name: API_KEY
+          value: "sk-1234567890abcdef"
+        # Normal env var
+        - name: LOG_LEVEL
+          value: "INFO"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hardened-app
+  namespace: test-hardening
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hardened-app
+  template:
+    metadata:
+      labels:
+        app: hardened-app
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/app: runtime/default
+        # HDN-010: Image signature annotation (Cosign-style)
+        imageSignatureVerified: "true"
+        signedBy: "sigstore"
+        # HDN-009: Vault annotation for secret injection
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "app-role"
+    spec:
+      # HDN-005: Seccomp profile at pod level
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+        # HDN-007: Will check if NetworkPolicy exists for this namespace
+      containers:
+      - name: app
+        # Good: specific version tag, not :latest
+        image: nginx:1.27-alpine
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 3000
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        env:
+        # No plaintext secrets in env - uses Vault instead
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: SERVICE_NAME
+          value: "hardened-app"
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: var-cache
+          mountPath: /var/cache/nginx
+        - name: var-run
+          mountPath: /var/run
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: var-cache
+        emptyDir: {}
+      - name: var-run
+        emptyDir: {}
+---
+# NetworkPolicy for hardened namespace
+# HDN-007: Ensures hardened-app passes the NetworkPolicy check
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: test-hardening
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-hardened-app
+  namespace: test-hardening
+spec:
+  podSelector:
+    matchLabels:
+      app: hardened-app
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          role: frontend
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          role: backend
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53

@@ -48,6 +48,10 @@ spec:
                   type: boolean
                   default: false
                   description: "Enforces rate limiting on MCP endpoints"
+                requireHardenedDeployment:
+                  type: boolean
+                  default: true
+                  description: "Enforces container security context, NetworkPolicy coverage, and image hygiene checks"
                 maxToolsWarning:
                   type: integer
                   default: 10
@@ -83,6 +87,9 @@ spec:
                     toolScope:
                       type: integer
                       default: 5
+                    hardenedDeployment:
+                      type: integer
+                      default: 15
                 severityPenalties:
                   type: object
                   description: "Point deductions per finding severity level"

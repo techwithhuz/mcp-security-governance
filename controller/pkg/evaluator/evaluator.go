@@ -26,6 +26,7 @@ const (
 	CategoryRateLimit       = "RateLimit"
 	CategoryExposure        = "Exposure"
 	CategoryToolScope       = "ToolScope"
+	CategoryHardening       = "Hardening"
 )
 
 // ClusterState holds discovered Kubernetes resource state
@@ -42,8 +43,10 @@ type ClusterState struct {
 	KagentRemoteMCPServers []KagentRemoteMCPServerResource
 
 	// Standard K8s
-	Services   []ServiceResource
-	Namespaces []string
+	Services         []ServiceResource
+	Namespaces       []string
+	Workloads        []WorkloadResource
+	NetworkPolicies  []NetworkPolicyResource
 }
 
 // FilterByNamespaces returns a new ClusterState containing only resources whose
@@ -119,6 +122,16 @@ func (s *ClusterState) FilterByNamespaces(targetNamespaces, excludeNamespaces []
 	for _, r := range s.Services {
 		if allowed[r.Namespace] {
 			filtered.Services = append(filtered.Services, r)
+		}
+	}
+	for _, r := range s.Workloads {
+		if allowed[r.Namespace] {
+			filtered.Workloads = append(filtered.Workloads, r)
+		}
+	}
+	for _, r := range s.NetworkPolicies {
+		if allowed[r.Namespace] {
+			filtered.NetworkPolicies = append(filtered.NetworkPolicies, r)
 		}
 	}
 
@@ -231,6 +244,48 @@ type ServiceResource struct {
 	IsMCP       bool
 }
 
+// WorkloadResource holds security-relevant fields extracted from a Deployment or StatefulSet pod spec.
+type WorkloadResource struct {
+	Name      string
+	Namespace string
+	Kind      string // "Deployment" or "StatefulSet"
+
+	// Pod-level security context
+	RunAsNonRoot      bool
+	RunAsUser         int64
+	RunAsGroup        int64
+	FSGroup           int64
+	SeccompProfileSet bool // RuntimeDefault or Localhost seccomp profile is set
+
+	// Container-level security context (all containers must pass for the flag to be true)
+	AllContainersNonRoot          bool // all containers set runAsNonRoot:true or runAsUser != 0
+	AllContainersReadOnlyRootFS   bool // all containers set readOnlyRootFilesystem:true
+	AllContainersNoPrivEscalation bool // all containers set allowPrivilegeEscalation:false
+	AllContainersCapDropAll       bool // all containers drop ALL capabilities
+
+	// Image hygiene
+	HasLatestTag bool     // any container image uses :latest or has no tag
+	ImageNames   []string // all container image names
+
+	// Secret hygiene
+	HasPlaintextEnvSecrets bool     // any container has env var value (not valueFrom) matching secret-like names
+	PlaintextEnvVarNames   []string // names of the offending env vars
+
+	// Secret store annotations
+	HasVaultInjection bool // pod has vault.hashicorp.com/agent-inject: "true"
+	HasESOAnnotation  bool // pod has secrets-store.csi.x-k8s.io/* annotation
+	HasImageSignature bool // pod has cosign.sigstore.dev/* annotation
+}
+
+// NetworkPolicyResource holds a discovered NetworkPolicy resource.
+type NetworkPolicyResource struct {
+	Name              string
+	Namespace         string
+	PodSelectorLabels map[string]string
+	HasIngressRules   bool
+	HasEgressRules    bool
+}
+
 // Finding represents a governance finding
 type Finding struct {
 	ID          string `json:"id"`
@@ -267,7 +322,8 @@ type ScoreBreakdown struct {
 	TLSScore            int `json:"tlsScore"`
 	PromptGuardScore    int `json:"promptGuardScore"`
 	RateLimitScore      int `json:"rateLimitScore"`
-	ToolScopeScore      int `json:"toolScopeScore"`
+	ToolScopeScore           int `json:"toolScopeScore"`
+	HardenedDeploymentScore  int `json:"hardenedDeploymentScore"`
 	// InfraAbsent tracks which categories scored 0 due to missing infrastructure
 	// (as opposed to penalty overflow). Key = category display name.
 	InfraAbsent map[string]bool `json:"infraAbsent,omitempty"`
@@ -308,7 +364,8 @@ type Policy struct {
 	RequireRBAC         bool
 	RequirePromptGuard  bool
 	RequireTLS          bool
-	RequireRateLimit    bool
+	RequireRateLimit           bool
+	RequireHardenedDeployment  bool     // If true, check container securityContext and NetworkPolicy
 	EnableAIAgent       bool     // If true, use AI agent for governance scoring alongside algorithmic scoring
 	AIProvider          string   // LLM provider: "gemini" or "ollama" (default: "gemini")
 	AIModel             string   // Model name (e.g. "gemini-2.5-flash", "llama3.1")
@@ -342,6 +399,7 @@ type ScoringWeights struct {
 	PromptGuard             int
 	RateLimit               int
 	ToolScope               int
+	HardenedDeployment      int
 }
 
 // DefaultExcludeNamespaces returns the list of system namespaces that should
@@ -357,25 +415,27 @@ func DefaultExcludeNamespaces() []string {
 
 func DefaultPolicy() Policy {
 	return Policy{
-		RequireAgentGateway: true,
-		RequireCORS:         true,
-		RequireJWTAuth:      true,
-		RequireRBAC:         true,
-		RequirePromptGuard:  false,
-		RequireTLS:          true,
-		RequireRateLimit:    false,
-		MaxToolsWarning:     10,
-		MaxToolsCritical:    15,
-		ExcludeNamespaces:   DefaultExcludeNamespaces(),
+		RequireAgentGateway:       true,
+		RequireCORS:               true,
+		RequireJWTAuth:            true,
+		RequireRBAC:               true,
+		RequirePromptGuard:        false,
+		RequireTLS:                true,
+		RequireRateLimit:          false,
+		RequireHardenedDeployment: true,
+		MaxToolsWarning:           10,
+		MaxToolsCritical:          15,
+		ExcludeNamespaces:         DefaultExcludeNamespaces(),
 		Weights: ScoringWeights{
-			AgentGatewayIntegration: 25,
-			Authentication:          20,
+			AgentGatewayIntegration: 20,
+			Authentication:          15,
 			Authorization:           15,
 			CORSPolicy:              10,
 			TLSEncryption:           10,
-			PromptGuard:             10,
+			PromptGuard:             5,
 			RateLimit:               5,
 			ToolScope:               5,
+			HardenedDeployment:      15,
 		},
 		SeverityPenalties: DefaultSeverityPenalties(),
 	}
@@ -410,6 +470,7 @@ func Evaluate(state *ClusterState, policy Policy) *EvaluationResult {
 	result.Findings = append(result.Findings, checkRateLimit(state, policy)...)
 	result.Findings = append(result.Findings, checkExposure(state, policy)...)
 	result.Findings = append(result.Findings, checkToolCount(state, policy)...)
+	result.Findings = append(result.Findings, checkHardenedDeployment(state, policy)...)
 
 	// 3. Calculate scores
 	result.ScoreBreakdown = calculateScores(state, result.Findings, policy)
@@ -1117,6 +1178,9 @@ func calculateScores(state *ClusterState, findings []Finding, policy Policy) Sco
 	if policy.MaxToolsWarning > 0 || policy.MaxToolsCritical > 0 {
 		apply("Tool Scope", calculateCategoryScore(CategoryToolScope, "", findings, state, policy), &breakdown.ToolScopeScore)
 	}
+	if policy.RequireHardenedDeployment {
+		apply("Hardened Deployment", calculateCategoryScore(CategoryHardening, "", findings, state, policy), &breakdown.HardenedDeploymentScore)
+	}
 
 	return breakdown
 }
@@ -1174,7 +1238,8 @@ func isInfrastructureAbsenceFinding(f Finding) bool {
 		"CORS-003",  // No agentgateway infrastructure for CORS
 		"TLS-002",   // No agentgateway backends for TLS
 		"PG-002",    // No agentgateway infrastructure for prompt guard
-		"RL-002":    // No agentgateway infrastructure for rate limiting
+		"RL-002",   // No agentgateway infrastructure for rate limiting
+		"HDN-000":  // No workloads discovered for hardening check
 		return true
 	default:
 		return false
@@ -1217,6 +1282,10 @@ func calculateOverallScore(breakdown ScoreBreakdown, weights ScoringWeights, pol
 		totalWeight += weights.ToolScope
 		weightedScore += breakdown.ToolScopeScore * weights.ToolScope
 	}
+	if policy.RequireHardenedDeployment {
+		totalWeight += weights.HardenedDeployment
+		weightedScore += breakdown.HardenedDeploymentScore * weights.HardenedDeployment
+	}
 
 	if totalWeight == 0 {
 		return 100 // no requirements = fully compliant
@@ -1255,6 +1324,9 @@ func aggregateBreakdownFromMCPViews(views []MCPServerView, policy Policy) ScoreB
 		if policy.RequirePromptGuard {
 			infraAbsent["Prompt Guard"] = true
 		}
+		if policy.RequireHardenedDeployment {
+			infraAbsent["Hardened Deployment"] = true
+		}
 		bd := ScoreBreakdown{}
 		if len(infraAbsent) > 0 {
 			bd.InfraAbsent = infraAbsent
@@ -1262,7 +1334,7 @@ func aggregateBreakdownFromMCPViews(views []MCPServerView, policy Policy) ScoreB
 		return bd
 	}
 
-	var sumGW, sumAuth, sumAuthz, sumTLS, sumCORS, sumRL, sumPG, sumTool int
+	var sumGW, sumAuth, sumAuthz, sumTLS, sumCORS, sumRL, sumPG, sumTool, sumHDN int
 	for _, v := range views {
 		sumGW += v.ScoreBreakdown.GatewayRouting
 		sumAuth += v.ScoreBreakdown.Authentication
@@ -1272,17 +1344,19 @@ func aggregateBreakdownFromMCPViews(views []MCPServerView, policy Policy) ScoreB
 		sumRL += v.ScoreBreakdown.RateLimit
 		sumPG += v.ScoreBreakdown.PromptGuard
 		sumTool += v.ScoreBreakdown.ToolScope
+		sumHDN += v.ScoreBreakdown.HardeningScore
 	}
 
 	bd := ScoreBreakdown{
-		AgentGatewayScore:   sumGW / n,
-		AuthenticationScore: sumAuth / n,
-		AuthorizationScore:  sumAuthz / n,
-		TLSScore:            sumTLS / n,
-		CORSScore:           sumCORS / n,
-		RateLimitScore:      sumRL / n,
-		PromptGuardScore:    sumPG / n,
-		ToolScopeScore:      sumTool / n,
+		AgentGatewayScore:       sumGW / n,
+		AuthenticationScore:     sumAuth / n,
+		AuthorizationScore:      sumAuthz / n,
+		TLSScore:                sumTLS / n,
+		CORSScore:               sumCORS / n,
+		RateLimitScore:          sumRL / n,
+		PromptGuardScore:        sumPG / n,
+		ToolScopeScore:          sumTool / n,
+		HardenedDeploymentScore: sumHDN / n,
 	}
 
 	// Determine InfraAbsent: a category is "infra absent" at cluster level
@@ -1300,6 +1374,7 @@ func aggregateBreakdownFromMCPViews(views []MCPServerView, policy Policy) ScoreB
 		{"CORS Policy", policy.RequireCORS, bd.CORSScore},
 		{"Rate Limiting", policy.RequireRateLimit, bd.RateLimitScore},
 		{"Prompt Guard", policy.RequirePromptGuard, bd.PromptGuardScore},
+		{"Hardened Deployment", policy.RequireHardenedDeployment, bd.HardenedDeploymentScore},
 	}
 	for _, c := range categoryChecks {
 		if c.required && c.score == 0 {
@@ -1322,6 +1397,8 @@ func aggregateBreakdownFromMCPViews(views []MCPServerView, policy Policy) ScoreB
 					s = v.ScoreBreakdown.RateLimit
 				case "Prompt Guard":
 					s = v.ScoreBreakdown.PromptGuard
+				case "Hardened Deployment":
+					s = v.ScoreBreakdown.HardeningScore
 				}
 				if s > 0 {
 					allZero = false
@@ -1397,4 +1474,219 @@ func isMCPServerRouted(mcp KagentMCPServerResource, state *ClusterState) bool {
 		}
 	}
 	return false
+}
+
+// ---------- HARDENED DEPLOYMENT CHECKS ----------
+
+// checkHardenedDeployment checks container security context, NetworkPolicy coverage,
+// image hygiene, and secret management for all discovered workloads.
+func checkHardenedDeployment(state *ClusterState, policy Policy) []Finding {
+	if !policy.RequireHardenedDeployment {
+		return nil
+	}
+
+	var findings []Finding
+	ts := time.Now().Format(time.RFC3339)
+
+	// HDN-000: No workloads discovered
+	if len(state.Workloads) == 0 {
+		findings = append(findings, Finding{
+ID:          "HDN-000",
+Severity:    SeverityHigh,
+Category:    CategoryHardening,
+Title:       "No workloads discovered for hardening evaluation",
+Description: "No Deployments or StatefulSets were found in the evaluated namespaces.",
+Impact:      "Hardening posture cannot be assessed.",
+Remediation: "Ensure the controller has RBAC permission to list Deployments and StatefulSets, and that workloads are deployed in the target namespaces.",
+Timestamp:   ts,
+})
+		return findings
+	}
+
+	// Build set of namespaces that have at least one NetworkPolicy
+	namespacesWithNetPol := make(map[string]bool)
+	for _, np := range state.NetworkPolicies {
+		namespacesWithNetPol[np.Namespace] = true
+	}
+
+	// Track namespaces we've already reported HDN-007 for (de-duplicate per namespace)
+reportedNetPolNS := make(map[string]bool)
+
+for _, w := range state.Workloads {
+ref := w.Kind + "/" + w.Namespace + "/" + w.Name
+
+// HDN-001: Containers running as root
+if !w.AllContainersNonRoot {
+findings = append(findings, Finding{
+ID:          "HDN-001-" + w.Name,
+Severity:    SeverityCritical,
+Category:    CategoryHardening,
+Title:       "Containers may run as root",
+Description: "Not all containers in " + ref + " set runAsNonRoot:true or a non-zero runAsUser.",
+Impact:      "A container compromise grants root-level access to the host.",
+Remediation: "Set securityContext.runAsNonRoot: true and runAsUser > 0 on all containers.",
+ResourceRef: ref,
+Namespace:   w.Namespace,
+Timestamp:   ts,
+})
+}
+
+// HDN-002: No readOnlyRootFilesystem
+if !w.AllContainersReadOnlyRootFS {
+findings = append(findings, Finding{
+ID:          "HDN-002-" + w.Name,
+Severity:    SeverityHigh,
+Category:    CategoryHardening,
+Title:       "Root filesystem is writable",
+Description: "Not all containers in " + ref + " set readOnlyRootFilesystem:true.",
+Impact:      "An attacker can write binaries or config files to the container filesystem.",
+Remediation: "Set securityContext.readOnlyRootFilesystem: true and use emptyDir volumes for writable paths.",
+ResourceRef: ref,
+Namespace:   w.Namespace,
+Timestamp:   ts,
+})
+}
+
+// HDN-003: Privilege escalation allowed
+if !w.AllContainersNoPrivEscalation {
+findings = append(findings, Finding{
+ID:          "HDN-003-" + w.Name,
+Severity:    SeverityHigh,
+Category:    CategoryHardening,
+Title:       "Privilege escalation not disabled",
+Description: "Not all containers in " + ref + " set allowPrivilegeEscalation:false.",
+Impact:      "A process can escalate to root via setuid binaries.",
+Remediation: "Set securityContext.allowPrivilegeEscalation: false on all containers.",
+ResourceRef: ref,
+Namespace:   w.Namespace,
+Timestamp:   ts,
+})
+}
+
+// HDN-004: Capabilities not dropped
+if !w.AllContainersCapDropAll {
+findings = append(findings, Finding{
+ID:          "HDN-004-" + w.Name,
+Severity:    SeverityMedium,
+Category:    CategoryHardening,
+Title:       "Linux capabilities not fully dropped",
+Description: "Not all containers in " + ref + " drop ALL capabilities.",
+Impact:      "Unnecessary Linux capabilities increase the attack surface.",
+Remediation: "Add capabilities.drop: [\"ALL\"] to the container securityContext.",
+ResourceRef: ref,
+Namespace:   w.Namespace,
+Timestamp:   ts,
+})
+}
+
+// HDN-005: No seccomp profile
+if !w.SeccompProfileSet {
+findings = append(findings, Finding{
+ID:          "HDN-005-" + w.Name,
+Severity:    SeverityMedium,
+Category:    CategoryHardening,
+Title:       "No seccomp profile configured",
+Description: "The pod spec for " + ref + " does not set a seccomp profile.",
+Impact:      "Without a seccomp profile, containers can make any system call.",
+Remediation: "Set securityContext.seccompProfile.type: RuntimeDefault on the pod spec.",
+ResourceRef: ref,
+Namespace:   w.Namespace,
+Timestamp:   ts,
+})
+}
+
+// HDN-006: :latest or untagged image
+if w.HasLatestTag {
+findings = append(findings, Finding{
+ID:          "HDN-006-" + w.Name,
+Severity:    SeverityMedium,
+Category:    CategoryHardening,
+Title:       "Container image uses :latest or has no tag",
+Description: ref + " has one or more containers with unversioned images: " + joinStrings(w.ImageNames, ", "),
+Impact:      "Unversioned images make deployments non-reproducible and can pull unexpected updates.",
+Remediation: "Pin all container images to a specific immutable digest or version tag (not :latest).",
+ResourceRef: ref,
+Namespace:   w.Namespace,
+Timestamp:   ts,
+})
+}
+
+// HDN-007: No NetworkPolicy in namespace (one finding per namespace)
+if !namespacesWithNetPol[w.Namespace] && !reportedNetPolNS[w.Namespace] {
+reportedNetPolNS[w.Namespace] = true
+findings = append(findings, Finding{
+ID:          "HDN-007-" + w.Namespace,
+Severity:    SeverityCritical,
+Category:    CategoryHardening,
+Title:       "No NetworkPolicy found in namespace",
+Description: "Namespace '" + w.Namespace + "' has workloads but no NetworkPolicy resources.",
+Impact:      "All pods in the namespace can communicate freely with any other pod in the cluster.",
+Remediation: "Create NetworkPolicy resources to restrict ingress and egress traffic to the minimum required.",
+Namespace:   w.Namespace,
+Timestamp:   ts,
+})
+}
+
+// HDN-008: Plaintext secret env vars
+if w.HasPlaintextEnvSecrets {
+findings = append(findings, Finding{
+ID:          "HDN-008-" + w.Name,
+Severity:    SeverityHigh,
+Category:    CategoryHardening,
+Title:       "Potential secrets in plaintext environment variables",
+Description: ref + " has env vars with secret-like names set as literal values: " + joinStrings(w.PlaintextEnvVarNames, ", "),
+Impact:      "Secrets stored as plaintext env vars are visible in pod specs and process listings.",
+Remediation: "Use secretKeyRef or a secrets store (Vault, ESO) to inject secrets rather than hardcoding them.",
+ResourceRef: ref,
+Namespace:   w.Namespace,
+Timestamp:   ts,
+})
+}
+
+// HDN-009: No external secrets integration
+if !w.HasVaultInjection && !w.HasESOAnnotation {
+findings = append(findings, Finding{
+ID:          "HDN-009-" + w.Name,
+Severity:    SeverityMedium,
+Category:    CategoryHardening,
+Title:       "No external secrets manager integration detected",
+Description: ref + " does not use Vault agent injection or External Secrets Operator annotations.",
+Impact:      "Secrets may be managed as static Kubernetes Secrets without rotation or audit.",
+Remediation: "Integrate with HashiCorp Vault (vault.hashicorp.com/agent-inject) or ESO (secrets-store.csi.x-k8s.io) for secret lifecycle management.",
+ResourceRef: ref,
+Namespace:   w.Namespace,
+Timestamp:   ts,
+})
+}
+
+// HDN-010: No image signature annotation
+if !w.HasImageSignature {
+findings = append(findings, Finding{
+ID:          "HDN-010-" + w.Name,
+Severity:    SeverityMedium,
+Category:    CategoryHardening,
+Title:       "No image signature verification annotation detected",
+Description: ref + " does not have Cosign/Sigstore image signature annotations.",
+Impact:      "Unsigned images cannot be verified against a trusted supply chain.",
+Remediation: "Sign container images with Cosign and enforce signature verification via admission webhooks (Kyverno/OPA).",
+ResourceRef: ref,
+Namespace:   w.Namespace,
+Timestamp:   ts,
+})
+}
+}
+
+return findings
+}
+
+// joinStrings joins a string slice with a separator, returning "<none>" if empty.
+func joinStrings(ss []string, sep string) string {
+if len(ss) == 0 {
+return "<none>"
+}
+result := ss[0]
+for _, s := range ss[1:] {
+result += sep + s
+}
+return result
 }

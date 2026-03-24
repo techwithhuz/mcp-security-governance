@@ -20,6 +20,7 @@ export interface ScoreBreakdown {
   promptGuardScore?: number;
   rateLimitScore?: number;
   toolScopeScore?: number;
+  hardeningScore?: number;
 }
 
 export interface ScoreCategory {
@@ -111,6 +112,7 @@ export interface MCPServerScoreBreakdown {
   rateLimit: number;
   promptGuard: number;
   toolScope: number;
+  hardenedDeployment: number;
 }
 
 export interface ScoreExplanation {
@@ -164,6 +166,12 @@ export interface MCPServerView {
   hasCORS: boolean;
   hasRateLimit: boolean;
   hasPromptGuard: boolean;
+  isHardened?: boolean;
+  hasNonRootUser?: boolean;
+  hasReadOnlyFS?: boolean;
+  hasSecurityContext?: boolean;
+  hasSeccomp?: boolean;
+  imageVersionPinned?: boolean;
 
   score: number;
   grade: string;

@@ -1,0 +1,37 @@
+---
+# RemoteMCPServer pointing to the hardened MCPServer
+# This allows the scoring system to evaluate the hardening controls
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: hardened-mcp-server-remote
+  namespace: mcp-governance
+  labels:
+    app.kubernetes.io/name: hardened-mcp-server-remote
+    app.kubernetes.io/component: mcp-server
+spec:
+  url: http://my-mcp-server-hardened.kagent:3000/mcp
+  description: "Hardened MCP Server with all Tier 1 security controls (HDN-001 to HDN-010)"
+  
+  # Credentials (if needed - optional)
+  # auth:
+  #   secretRef:
+  #     name: hardened-mcp-credentials
+  
+  # Connection timeout
+  timeout: 30s
+
+---
+# RemoteMCPServer pointing to the vulnerable MCPServer for comparison
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: vulnerable-mcp-server-remote
+  namespace: mcp-governance
+  labels:
+    app.kubernetes.io/name: vulnerable-mcp-server-remote
+    app.kubernetes.io/component: mcp-server
+spec:
+  url: http://my-mcp-server-vulnerable.kagent:3000/mcp
+  description: "Vulnerable MCP Server - demonstrates hardening violations"
+  timeout: 30s
