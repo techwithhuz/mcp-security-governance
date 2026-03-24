@@ -21,6 +21,7 @@ const categoryLabels: { key: keyof MCPServerScoreBreakdown; label: string; icon:
   { key: 'rateLimit', label: 'Rate Limiting', icon: Zap },
   { key: 'promptGuard', label: 'Prompt Guard', icon: ShieldCheck },
   { key: 'toolScope', label: 'Tool Scope', icon: Server },
+  { key: 'hardenedDeployment', label: 'Hardened Deployment', icon: ShieldAlert },
 ];
 
 const severityColors: Record<string, string> = {
@@ -128,7 +129,7 @@ export default function MCPServerDetail({ server, onBack }: MCPServerDetailProps
       {/* Security Controls Grid */}
       <div>
         <h3 className="text-sm font-bold text-gov-text-2 mb-3 px-1 uppercase tracking-wider">Security Controls</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-3">
           {categoryLabels.map(cat => {
             const score = bd[cat.key];
             const color = getScoreColor(score);

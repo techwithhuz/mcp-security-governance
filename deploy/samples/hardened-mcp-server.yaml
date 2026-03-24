@@ -1,0 +1,130 @@
+---
+# Hardened MCPServer with all security controls enabled
+apiVersion: kagent.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: my-mcp-server-hardened
+  namespace: kagent
+  annotations:
+    # HDN-010: Image signature verification annotation
+    imageSignatureVerified: "true"
+    signedBy: "sigstore"
+    # HDN-009: External secrets manager integration
+    vault.hashicorp.com/agent-inject: "true"
+    vault.hashicorp.com/role: "mcp-server-role"
+    # AppArmor security profile
+    container.apparmor.security.beta.kubernetes.io/mcp-server: runtime/default
+spec:
+  deployment:
+    args:
+    - '@modelcontextprotocol/server-everything'
+    cmd: npx
+    port: 3000
+    
+    # HDN-001: Run as non-root user
+    # HDN-002: Read-only root filesystem
+    # HDN-003: Prevent privilege escalation
+    # HDN-004: Drop all Linux capabilities
+    # HDN-005: Enable seccomp profile
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 3000
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+        - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 3000
+      fsGroup: 2000
+      seccompProfile:
+        type: RuntimeDefault
+    
+    # HDN-006: Use specific image version, not :latest
+    image: node:24-alpine3.21
+    imagePullPolicy: IfNotPresent
+    
+    # Resource limits for stability
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    
+    # Environment variables (non-sensitive) - as object, not array
+    env:
+      LOG_LEVEL: "INFO"
+      MCP_SERVER_NAME: "my-mcp-server-hardened"
+    
+    # Reference secrets securely - as array of objects with name
+    secretRefs:
+    - name: mcp-server-hardened-secrets
+    
+    # Mount secrets as volumes, not environment variables
+    volumeMounts:
+    - name: secrets
+      mountPath: /var/run/secrets
+      readOnly: true
+    - name: tmp
+      mountPath: /tmp
+    
+    # Define volumes
+    volumes:
+    - name: secrets
+      secret:
+        secretName: mcp-server-hardened-secrets
+        defaultMode: 0400
+    - name: tmp
+      emptyDir:
+        medium: Memory
+        sizeLimit: 100Mi
+    
+    # Pod placement preferences
+    nodeSelector:
+      kubernetes.io/os: linux
+  
+  stdioTransport: {}
+  transportType: stdio
+
+---
+# Hardened MCPServer with all security controls enabled
+apiVersion: kagent.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: my-mcp-server-vulnerable
+  namespace: kagent
+spec:
+  deployment:
+    args:
+    - '@modelcontextprotocol/server-everything'
+    cmd: npx
+    port: 3000
+    
+    # ❌ VULNERABILITIES:
+    # - No securityContext (runs as root)
+    # - No readOnlyRootFilesystem
+    # - No capability dropping
+    # - No seccomp
+    # - Uses :latest tag
+    # - Plaintext environment variables
+    
+    image: ghcr.io/modelcontextprotocol/server-everything:latest
+    imagePullPolicy: Always
+    
+    # ❌ HDN-008: Plaintext secrets in environment variables
+    env:
+      LOG_LEVEL: "DEBUG"
+      OPENAI_API_KEY: "sk-plaintext-key-in-yaml"
+      DATABASE_PASSWORD: "plaintext-password"
+  
+  stdioTransport: {}
+  transportType: stdio
+

@@ -79,10 +79,10 @@ func main() {
 	recordTrendPoint(lastResult)
 	updatePolicyStatus(policy.Name, lastResult)
 	updateEvaluationStatus(policy.Name, lastResult)
-	log.Printf("[governance] Initial evaluation. Score: %d, Findings: %d (Policy: AgentGW=%v, CORS=%v, JWT=%v, RBAC=%v, TLS=%v, PromptGuard=%v, RateLimit=%v, AIAgent=%v, TargetNS=%v, ExcludeNS=%v)", 
+	log.Printf("[governance] Initial evaluation. Score: %d, Findings: %d (Policy: AgentGW=%v, CORS=%v, JWT=%v, RBAC=%v, TLS=%v, PromptGuard=%v, RateLimit=%v, Hardening=%v, AIAgent=%v, TargetNS=%v, ExcludeNS=%v)", 
 		lastResult.Score, len(lastResult.Findings),
 		policy.RequireAgentGateway, policy.RequireCORS, policy.RequireJWTAuth, 
-		policy.RequireRBAC, policy.RequireTLS, policy.RequirePromptGuard, policy.RequireRateLimit,
+		policy.RequireRBAC, policy.RequireTLS, policy.RequirePromptGuard, policy.RequireRateLimit, policy.RequireHardenedDeployment,
 		policy.EnableAIAgent,
 		policy.TargetNamespaces, policy.ExcludeNamespaces)
 
@@ -374,7 +374,12 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.RateLimit }},
 		{"Tool Scope", snap.policy.MaxToolsWarning > 0 || snap.policy.MaxToolsCritical > 0, pw.ToolScope, bd.ToolScopeScore,
 			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.ToolScope }},
+		{"Hardened Deployment", snap.policy.RequireHardenedDeployment, pw.HardenedDeployment, bd.HardenedDeploymentScore,
+			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.HardeningScore }},
 	}
+
+	// DEBUG: Log policy.RequireHardenedDeployment status
+	log.Printf("[api] handleScore: RequireHardenedDeployment=%v, HardenedDeployment weight=%d", snap.policy.RequireHardenedDeployment, pw.HardenedDeployment)
 
 	totalWeight := 0
 	var cats []categoryDetail
@@ -527,6 +532,9 @@ func handleBreakdown(w http.ResponseWriter, r *http.Request) {
 	}
 	if snap.policy.MaxToolsWarning > 0 || snap.policy.MaxToolsCritical > 0 {
 		result["toolScopeScore"] = bd.ToolScopeScore
+	}
+	if snap.policy.RequireHardenedDeployment {
+		result["hardeningScore"] = bd.HardenedDeploymentScore
 	}
 	jsonResponse(w, result)
 }

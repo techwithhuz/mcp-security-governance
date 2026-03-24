@@ -51,7 +51,7 @@ func DefaultWatchedResources() []WatchedResource {
 		{
 			Label: "MCPServer",
 			GVR: schema.GroupVersionResource{
-				Group: "kagent.dev", Version: "v1alpha2", Resource: "mcpservers",
+				Group: "kagent.dev", Version: "v1alpha1", Resource: "mcpservers",
 			},
 		},
 		{

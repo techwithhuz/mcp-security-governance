@@ -15,6 +15,8 @@
   <img src="https://img.shields.io/badge/AI-Ollama-000?logo=ollama&logoColor=white" alt="Ollama" />
   <img src="https://img.shields.io/badge/Container-Podman-892CA0?logo=podman&logoColor=white" alt="Podman" />
   <img src="https://img.shields.io/badge/Deploy-Helm%203-0F1689?logo=helm&logoColor=white" alt="Helm" />
+  <img src="https://img.shields.io/badge/OWASP-MCP%20Top%2010-CC0000?logo=owasp&logoColor=white" alt="OWASP MCP Top 10" />
+  <img src="https://img.shields.io/badge/Compliance-OWASP%20Tier%201-CC0000?logo=owasp&logoColor=white" alt="OWASP Compliant" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
 </p>
 
@@ -25,6 +27,7 @@
 - [Overview](#-overview)
 - [Architecture](#-architecture)
 - [What It Checks](#-what-it-checks)
+- [Hardened Deployment Security](#️-hardened-deployment-security)
 - [Verified Catalog Scoring](#-verified-catalog-scoring)
 - [Governance Controller Status Updates](#-governance-controller-status-updates)
 - [MCP-Server-Centric Scoring](#-mcp-server-centric-scoring)
@@ -58,11 +61,13 @@ As AI agents powered by the **Model Context Protocol (MCP)** proliferate across 
 
 1. **Discovering** all MCP-related resources in your cluster — AgentGateway backends, policies, Kagent agents, MCPServers, RemoteMCPServers, MCPServerCatalog entries, Gateway API routes
 2. **Correlating** resources into an **MCP-Server-centric view** — each MCP server is scored independently based on its related gateway routes, security policies, and tool exposure
-3. **Evaluating** each MCP server against a configurable security policy defined as a Kubernetes CRD across **8 governance categories**: AgentGateway routing, authentication, authorization, CORS, TLS, prompt guard, rate limiting, and tool scope
+3. **Evaluating** each MCP server against a configurable security policy defined as a Kubernetes CRD across **9 governance categories**: AgentGateway routing, authentication, authorization, CORS, TLS, prompt guard, rate limiting, tool scope, and **hardened deployment** (OWASP MCP Tier 1 security controls)
 4. **Verified Catalog Scoring** — scores MCP server catalog entries from your Agent Registry based on publisher verification (25pts), transport security (20pts), deployment health (20pts), tool scope (18pts), and usage patterns (17pts)
 5. **Scoring** your cluster's MCP security posture on a 0–100 scale where the cluster score is the **weighted average of per-server scores**, plus catalog integrity assessment
 6. **AI-Powered Analysis** — optionally runs an AI agent (Google Gemini or local Ollama) alongside the algorithmic scorer for deeper risk analysis, reasoning, and actionable suggestions
 7. **Surfacing** findings, tool exposure metrics, catalog verification status, and per-server security details in a real-time dashboard with interactive score explanations and governance insights
+
+> **OWASP Compliance:** The hardened deployment category implements the [OWASP MCP Security Top 10](https://owasp.org/www-project-model-context-protocol-security/) Tier 1 container security controls — ensuring your MCP server workloads meet industry-standard security baselines alongside gateway-level governance.
 
 ---
 
@@ -81,7 +86,7 @@ graph TB
 
         subgraph Ctrl["⚙️ Governance Controller"]
             API["<b>Go API Server</b><br/>:8090"]
-            Evaluator["<b>Scoring Engine</b><br/>8 governance categories<br/>0–100 weighted score"]
+            Evaluator["<b>Scoring Engine</b><br/>9 governance categories<br/>0–100 weighted score"]
             AIAgent["<b>🧠 AI Agent</b><br/>Google Gemini / Ollama<br/>Risk analysis & suggestions"]
             Discovery["<b>Resource Discovery</b><br/>Every 30s"]
         end
@@ -144,7 +149,7 @@ graph TB
 1. The **controller** discovers all MCP-related resources via the Kubernetes API every 30 seconds
 2. It reads the **MCPGovernancePolicy** CRD to determine what to enforce
 3. The **MCP server correlation engine** builds per-server views — associating each MCPServer/RemoteMCPServer with its gateway routes, backends, security policies, and tool restrictions
-4. The **evaluator** scores each MCP server independently across 8 categories, then aggregates into a cluster-level score (weighted average of per-server averages)
+4. The **evaluator** scores each MCP server independently across 9 categories, then aggregates into a cluster-level score (weighted average of per-server averages)
 5. If enabled, the **AI agent** sends cluster state to an LLM (Gemini or Ollama) for deeper risk analysis, reasoning, and suggestions
 6. Results are exposed via a REST API and written back to a **GovernanceEvaluation** CRD
 7. The **dashboard** polls the API every 15 seconds and renders real-time visualizations including per-server drill-down, tool exposure metrics, and interactive score explanations
@@ -163,7 +168,138 @@ graph TB
 | **Prompt Guard** | Prompt injection protection on AI backends | Medium |
 | **Rate Limiting** | Rate limit policies on MCP endpoints | Medium |
 | **Tool Scope** | Per-server tool count vs configured thresholds | Warning / Critical |
+| **Hardened Deployment** | OWASP MCP Tier 1 container security controls (HDN-001–HDN-010) | High / Critical |
 | **Exposure** | Direct MCP server exposure without gateway — auto-escalates to Critical | Critical |
+
+> ℹ️ The **Hardened Deployment** category implements the [OWASP MCP Security Top 10](https://owasp.org/www-project-model-context-protocol-security/) Tier 1 container hardening controls. Enabling `requireHardenedDeployment: true` in the policy activates all 10 checks.
+
+---
+
+## 🛡️ Hardened Deployment Security
+
+> ✅ **OWASP MCP Security Top 10 — Tier 1 Compliant**
+>
+> This feature implements the [OWASP Model Context Protocol Security Top 10](https://owasp.org/www-project-model-context-protocol-security/) container hardening requirements. All 10 checks (`HDN-001` through `HDN-010`) are mapped to OWASP MCP security risks to ensure MCP server workloads meet the industry baseline for AI-agent infrastructure security.
+
+MCP Governance automatically inspects the underlying Kubernetes `Deployment` for each MCP server and evaluates **10 OWASP-aligned security controls**. Failures generate structured findings (`HDN-*`) with severity ratings, impact descriptions, and remediation guidance — all visible in the dashboard.
+
+### OWASP MCP Security Alignment
+
+| Check ID | OWASP MCP Risk | CWE Reference |
+|---|---|---|
+| **HDN-001** | MCP2 — Inadequate Authorization | CWE-250: Execution with Unnecessary Privileges |
+| **HDN-002** | MCP2 — Inadequate Authorization | CWE-732: Incorrect Permission Assignment |
+| **HDN-003** | MCP2 — Inadequate Authorization | CWE-269: Improper Privilege Management |
+| **HDN-004** | MCP2 — Inadequate Authorization | CWE-250: Execution with Unnecessary Privileges |
+| **HDN-005** | MCP8 — Insufficient Runtime Security | CWE-693: Protection Mechanism Failure |
+| **HDN-006** | MCP9 — Supply Chain Attacks | CWE-1395: Dependency on Vulnerable Third-Party Component |
+| **HDN-007** | MCP5 — Inadequate Network Controls | CWE-923: Improper Restriction of Communication Channel |
+| **HDN-008** | MCP3 — Sensitive Information Disclosure | CWE-312: Cleartext Storage of Sensitive Information |
+| **HDN-009** | MCP3 — Sensitive Information Disclosure | CWE-522: Insufficiently Protected Credentials |
+| **HDN-010** | MCP9 — Supply Chain Attacks | CWE-345: Insufficient Verification of Data Authenticity |
+
+### What It Checks
+
+| Check ID | Severity | What's Evaluated | Pass Criteria |
+|---|---|---|---|
+| **HDN-001** | High | Non-root user | `runAsNonRoot: true` or `runAsUser > 0` |
+| **HDN-002** | High | Read-only root filesystem | `readOnlyRootFilesystem: true` |
+| **HDN-003** | High | Privilege escalation blocked | `allowPrivilegeEscalation: false` |
+| **HDN-004** | Medium | Capabilities dropped | `capabilities.drop` includes `ALL` |
+| **HDN-005** | Medium | Seccomp profile configured | `seccompProfile.type` set at pod or container level |
+| **HDN-006** | Medium | Image version pinned | Image tag is not `:latest` |
+| **HDN-007** | Medium | Network Policy present | At least one `NetworkPolicy` exists in the server's namespace |
+| **HDN-008** | Critical | No plaintext secrets in env | No env vars with names matching `PASSWORD`, `SECRET`, `KEY`, `TOKEN`, `API_KEY`, etc. |
+| **HDN-009** | Low | External secret management | Vault or similar secret injection annotations present |
+| **HDN-010** | Low | Image signed | Cosign/Sigstore or AppArmor signature annotation present |
+
+> All checks are aligned with the **OWASP MCP Security Top 10** — see the [OWASP Alignment table](#owasp-mcp-security-alignment) above for the full risk-to-check mapping.
+
+### Scoring Method
+
+The hardening score starts at **100** and deducts penalty points for each failing check:
+
+| Severity | Penalty per Violation |
+|---|---|
+| Critical | −40 pts |
+| High | −25 pts |
+| Medium | −15 pts |
+| Low | −5 pts |
+
+A server failing HDN-001 (High, −25), HDN-002 (High, −25), HDN-003 (High, −25) ends with **100 − 25 − 25 − 25 = 25/100**. The score is floored at 0.
+
+### Policy Configuration
+
+Enable hardening checks in your `MCPGovernancePolicy`:
+
+```yaml
+apiVersion: governance.mcp.io/v1alpha1
+kind: MCPGovernancePolicy
+metadata:
+  name: enterprise-mcp-policy
+spec:
+  requireHardenedDeployment: true   # Enable all HDN checks
+
+  scoringWeights:
+    # ... other weights ...
+    hardenedDeployment: 15          # Weight for hardening score (recommend 10–20)
+```
+
+### Example — Hardened Deployment YAML
+
+A fully hardened MCP server deployment passes all 10 controls:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-mcp-server
+  namespace: kagent
+spec:
+  template:
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"                          # HDN-009
+        container.apparmor.security.beta.kubernetes.io/app: runtime/default  # HDN-010
+    spec:
+      securityContext:
+        runAsNonRoot: true          # HDN-001
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault      # HDN-005
+      containers:
+      - name: app
+        image: nginx:1.27-alpine   # HDN-006: pinned tag (not :latest)
+        securityContext:
+          readOnlyRootFilesystem: true     # HDN-002
+          allowPrivilegeEscalation: false  # HDN-003
+          capabilities:
+            drop: ["ALL"]                  # HDN-004
+        env:
+        - name: LOG_LEVEL
+          value: "INFO"           # HDN-008: no plaintext secrets
+```
+
+Plus a `NetworkPolicy` in the namespace → **HDN-007** passes.
+
+### RemoteMCPServer Correlation
+
+For `RemoteMCPServer` resources (which point to external URLs), the controller automatically extracts the target **deployment name from the URL hostname** and correlates hardening findings:
+
+```
+http://kagent-tools.kagent:8084/mcp  →  deployment: kagent-tools  (namespace: kagent)
+```
+
+This ensures hardening scores are correctly attributed to the underlying workload even when accessed via a RemoteMCPServer reference.
+
+### Dashboard Integration
+
+Hardening results are visible throughout the dashboard:
+
+- **Overview → Score Breakdown** — `Hardened Deployment` bar alongside other 8 controls
+- **MCP Servers → Security Controls** — Per-server hardening score card with progress bar (click to see score explanation)
+- **MCP Servers → Findings** — Individual HDN-* findings with severity badge, description, impact, and `💡 Fix` remediation
+- **Score Explainer** — Category detail showing which servers pass/fail hardening and the cluster average
 
 ---
 
@@ -465,6 +601,7 @@ Each MCP server is evaluated for:
 | **Rate Limiting** | AgentgatewayPolicy `traffic.rateLimit` | Request rate limits enforced |
 | **Prompt Guard** | AgentgatewayPolicy `backend.ai.promptGuard` | Prompt injection protection + sensitive data masking |
 | **Tool Scope** | AgentgatewayPolicy `traffic.authorization.policy` | Tool count restricted via CEL expressions |
+| **Hardened Deployment** | Kubernetes `Deployment` spec | 10 OWASP Tier 1 container security controls (HDN-001–HDN-010) |
 
 ### Tool Exposure Tracking
 
@@ -503,13 +640,13 @@ Overall Score: 50/100 = Grade C
 | **Scale** | 0–100 per MCP server, cluster score = weighted average of per-server averages |
 | **Grade** | **A** (90+) · **B** (70–89) · **C** (50–69) · **D** (30–49) · **F** (<30) |
 | **Phase** | `Compliant` · `Warning` · `NonCompliant` · `Critical` |
-| **Categories** | 8 governance categories, each scored per MCP server |
-| **Category weights** | Configurable — default: AgentGateway 25, Auth 20, AuthZ 15, Tool Scope 10, CORS 10, TLS 10, PromptGuard 5, RateLimit 5 |
+| **Categories** | 9 governance categories, each scored per MCP server |
+| **Category weights** | Configurable — default: AgentGateway 25, Auth 20, AuthZ 15, Tool Scope 10, CORS 10, TLS 10, PromptGuard 5, RateLimit 5, **HardenedDeployment 15** |
 | **Infrastructure absence** | If a required control is missing for a server → that server scores 0 for that category |
 
 ### How scoring works
 
-Each MCP server is scored independently across 8 categories. A category scores 100 if the security control is present, 0 if missing. The cluster-level category score is the average across all MCP servers. The final cluster score is a weighted average of all enabled category scores.
+Each MCP server is scored independently across 9 categories. A category scores 100 if the security control is present, 0 if missing. The hardened deployment category uses a **penalty-based model** — it starts at 100 and deducts points per HDN violation (see [Hardened Deployment Security](#️-hardened-deployment-security)). The cluster-level category score is the average across all MCP servers. The final cluster score is a weighted average of all enabled category scores.
 
 ```
 Server Category Score  = 100 (control present) or 0 (control missing)
@@ -1077,6 +1214,7 @@ spec:
   requireTLS: true                # TLS termination on gateways
   requirePromptGuard: true        # Prompt injection protection
   requireRateLimit: true          # Rate limiting on endpoints
+  requireHardenedDeployment: true # OWASP MCP Tier 1 container hardening checks
 
   # ── Tool scope thresholds ────────────────────────────
   maxToolsWarning: 10             # Warning if server exposes > N tools
@@ -1092,6 +1230,7 @@ spec:
     promptGuard: 5
     rateLimit: 5
     toolScope: 10
+    hardenedDeployment: 15        # OWASP hardening weight
 
   # ── Severity penalty points ──────────────────────────
   severityPenalties:
@@ -1128,6 +1267,7 @@ spec:
 | `requireTLS` | bool | `true` | Require TLS on gateways |
 | `requirePromptGuard` | bool | `false` | Require prompt guard policies |
 | `requireRateLimit` | bool | `false` | Require rate limiting policies |
+| `requireHardenedDeployment` | bool | `false` | Enforce OWASP MCP Security Top 10 Tier 1 container hardening checks (HDN-001–HDN-010). Maps to OWASP MCP risks: MCP2, MCP3, MCP5, MCP8, MCP9 |
 | `maxToolsWarning` | int | `10` | Tool count warning threshold per server (0 = disabled) |
 | `maxToolsCritical` | int | `15` | Tool count critical threshold per server (0 = disabled) |
 | `scoringWeights.*` | int | varies | Weight per scoring category (should total 100) |
@@ -1182,7 +1322,7 @@ The dashboard provides a real-time MCP-Server-centric view of your cluster's sec
 | Component | Description |
 |---|---|
 | **Server List** | All discovered MCPServer/RemoteMCPServer resources with score, grade, security badges, tool exposure (`exposed/total tools`), and transport protocol |
-| **Server Detail** | Per-server drill-down showing: 8 security control cards (pass/fail), score breakdown with per-category explanations, related resources (Backend, HTTPRoute, Policy, Gateway) with detail pop-ups, findings attributed to this server |
+| **Server Detail** | Per-server drill-down showing: 9 security control cards (pass/fail), score breakdown with per-category explanations, related resources (Backend, HTTPRoute, Policy, Gateway) with detail pop-ups, findings attributed to this server |
 | **Score Explanation Modal** | Per-category detail showing what controls are present, source resources, and specific reasons |
 | **Resource Detail Modal** | Click any related resource to see its full configuration as key-value cards |
 

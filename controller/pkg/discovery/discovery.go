@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -90,10 +91,17 @@ func (d *K8sDiscoverer) DiscoverClusterState(ctx context.Context) *evaluator.Clu
 	// Discover Services with MCP labels/appProtocol
 	state.Services = d.discoverServices(ctx)
 
-	log.Printf("[discovery] Found: %d gateways, %d backends, %d policies, %d routes, %d agents, %d mcpservers, %d remote-mcpservers, %d services, %d namespaces",
+	// Discover workloads (Deployments + StatefulSets) for hardening checks
+	state.Workloads = d.discoverWorkloads(ctx)
+
+	// Discover NetworkPolicies for network segmentation checks
+	state.NetworkPolicies = d.discoverNetworkPolicies(ctx)
+
+	log.Printf("[discovery] Found: %d gateways, %d backends, %d policies, %d routes, %d agents, %d mcpservers, %d remote-mcpservers, %d services, %d namespaces, %d workloads, %d networkpolicies",
 		len(state.Gateways), len(state.AgentgatewayBackends), len(state.AgentgatewayPolicies),
 		len(state.HTTPRoutes), len(state.KagentAgents), len(state.KagentMCPServers),
-		len(state.KagentRemoteMCPServers), len(state.Services), len(state.Namespaces))
+		len(state.KagentRemoteMCPServers), len(state.Services), len(state.Namespaces),
+		len(state.Workloads), len(state.NetworkPolicies))
 
 	return state
 }
@@ -791,6 +799,203 @@ func (d *K8sDiscoverer) discoverServices(ctx context.Context) []evaluator.Servic
 	return services
 }
 
+// discoverWorkloads lists all Deployments and StatefulSets across all namespaces
+// and extracts pod-level security context fields needed for hardening checks.
+func (d *K8sDiscoverer) discoverWorkloads(ctx context.Context) []evaluator.WorkloadResource {
+	var workloads []evaluator.WorkloadResource
+
+	// Secret-like env var name patterns (case-insensitive substring match)
+	secretPatterns := []string{"key", "token", "secret", "password", "credential", "passwd", "apikey", "auth"}
+
+	isSecretLike := func(name string) bool {
+		lower := strings.ToLower(name)
+		for _, p := range secretPatterns {
+			if strings.Contains(lower, p) {
+				return true
+			}
+		}
+		return false
+	}
+
+	hasTag := func(image string) bool {
+		// image is latest if it has :latest suffix or no tag at all
+		if strings.HasSuffix(image, ":latest") {
+			return true
+		}
+		// No colon after the last slash means no tag (e.g. "nginx" with no :version)
+		parts := strings.Split(image, "/")
+		last := parts[len(parts)-1]
+		return !strings.Contains(last, ":")
+	}
+
+	processContainers := func(containers []corev1.Container, podSpec corev1.PodSpec, w *evaluator.WorkloadResource) {
+		allNonRoot := true
+		allReadOnly := true
+		allNoPrivEsc := true
+		allCapDropAll := true
+
+		for _, c := range containers {
+			w.ImageNames = append(w.ImageNames, c.Image)
+			if hasTag(c.Image) {
+				w.HasLatestTag = true
+			}
+
+			sc := c.SecurityContext
+			// Non-root check: container must set runAsNonRoot:true or runAsUser > 0
+			containerNonRoot := false
+			if sc != nil && sc.RunAsNonRoot != nil && *sc.RunAsNonRoot {
+				containerNonRoot = true
+			} else if sc != nil && sc.RunAsUser != nil && *sc.RunAsUser != 0 {
+				containerNonRoot = true
+			} else if podSpec.SecurityContext != nil {
+				if podSpec.SecurityContext.RunAsNonRoot != nil && *podSpec.SecurityContext.RunAsNonRoot {
+					containerNonRoot = true
+				} else if podSpec.SecurityContext.RunAsUser != nil && *podSpec.SecurityContext.RunAsUser != 0 {
+					containerNonRoot = true
+				}
+			}
+			if !containerNonRoot {
+				allNonRoot = false
+			}
+
+			// ReadOnlyRootFilesystem
+			if sc == nil || sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem {
+				allReadOnly = false
+			}
+
+			// AllowPrivilegeEscalation
+			if sc == nil || sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+				allNoPrivEsc = false
+			}
+
+			// Capabilities drop ALL
+			hasDropAll := false
+			if sc != nil && sc.Capabilities != nil {
+				for _, drop := range sc.Capabilities.Drop {
+					if string(drop) == "ALL" || string(drop) == "all" {
+						hasDropAll = true
+					}
+				}
+			}
+			if !hasDropAll {
+				allCapDropAll = false
+			}
+
+			// Plaintext env var secrets
+			for _, env := range c.Env {
+				if env.ValueFrom == nil && isSecretLike(env.Name) {
+					w.HasPlaintextEnvSecrets = true
+					w.PlaintextEnvVarNames = append(w.PlaintextEnvVarNames, env.Name)
+				}
+			}
+		}
+
+		w.AllContainersNonRoot = allNonRoot
+		w.AllContainersReadOnlyRootFS = allReadOnly
+		w.AllContainersNoPrivEscalation = allNoPrivEsc
+		w.AllContainersCapDropAll = allCapDropAll
+	}
+
+	extractPodMeta := func(podSpec corev1.PodSpec, annotations map[string]string, w *evaluator.WorkloadResource) {
+		// Pod-level security context
+		if psc := podSpec.SecurityContext; psc != nil {
+			if psc.RunAsNonRoot != nil {
+				w.RunAsNonRoot = *psc.RunAsNonRoot
+			}
+			if psc.RunAsUser != nil {
+				w.RunAsUser = *psc.RunAsUser
+			}
+			if psc.RunAsGroup != nil {
+				w.RunAsGroup = *psc.RunAsGroup
+			}
+			if psc.FSGroup != nil {
+				w.FSGroup = *psc.FSGroup
+			}
+			if psc.SeccompProfile != nil {
+				t := string(psc.SeccompProfile.Type)
+				if t == "RuntimeDefault" || t == "Localhost" {
+					w.SeccompProfileSet = true
+				}
+			}
+		}
+
+		// Vault / ESO annotations
+		for k, v := range annotations {
+			if k == "vault.hashicorp.com/agent-inject" && v == "true" {
+				w.HasVaultInjection = true
+			}
+			if strings.HasPrefix(k, "secrets-store.csi.x-k8s.io") {
+				w.HasESOAnnotation = true
+			}
+		}
+
+		// Image signature annotations (Cosign/Sigstore)
+		for k := range annotations {
+			if strings.HasPrefix(k, "cosign.sigstore.dev") || strings.HasPrefix(k, "dev.cosignproject.cosign") {
+				w.HasImageSignature = true
+			}
+		}
+	}
+
+	// Deployments
+	deploys, err := d.clientset.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Printf("[discovery] Failed to list Deployments: %v", err)
+	} else {
+		for _, dep := range deploys.Items {
+			w := evaluator.WorkloadResource{
+				Name:      dep.Name,
+				Namespace: dep.Namespace,
+				Kind:      "Deployment",
+			}
+			processContainers(dep.Spec.Template.Spec.Containers, dep.Spec.Template.Spec, &w)
+			extractPodMeta(dep.Spec.Template.Spec, dep.Spec.Template.Annotations, &w)
+			workloads = append(workloads, w)
+		}
+	}
+
+	// StatefulSets
+	ssets, err := d.clientset.AppsV1().StatefulSets("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Printf("[discovery] Failed to list StatefulSets: %v", err)
+	} else {
+		for _, ss := range ssets.Items {
+			w := evaluator.WorkloadResource{
+				Name:      ss.Name,
+				Namespace: ss.Namespace,
+				Kind:      "StatefulSet",
+			}
+			processContainers(ss.Spec.Template.Spec.Containers, ss.Spec.Template.Spec, &w)
+			extractPodMeta(ss.Spec.Template.Spec, ss.Spec.Template.Annotations, &w)
+			workloads = append(workloads, w)
+		}
+	}
+
+	return workloads
+}
+
+// discoverNetworkPolicies lists all NetworkPolicy resources across all namespaces.
+func (d *K8sDiscoverer) discoverNetworkPolicies(ctx context.Context) []evaluator.NetworkPolicyResource {
+	netPols, err := d.clientset.NetworkingV1().NetworkPolicies("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Printf("[discovery] Failed to list NetworkPolicies: %v", err)
+		return nil
+	}
+
+	var policies []evaluator.NetworkPolicyResource
+	for _, np := range netPols.Items {
+		p := evaluator.NetworkPolicyResource{
+			Name:              np.Name,
+			Namespace:         np.Namespace,
+			HasIngressRules:   len(np.Spec.Ingress) > 0,
+			HasEgressRules:    len(np.Spec.Egress) > 0,
+			PodSelectorLabels: np.Spec.PodSelector.MatchLabels,
+		}
+		policies = append(policies, p)
+	}
+	return policies
+}
+
 // DiscoverGovernancePolicy discovers MCPGovernancePolicy resources
 func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator.Policy {
 	gvr := schema.GroupVersionResource{
@@ -843,6 +1048,9 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 	}
 	if val, ok := spec["requireRateLimit"].(bool); ok {
 		policy.RequireRateLimit = val
+	}
+	if val, ok := spec["requireHardenedDeployment"].(bool); ok {
+		policy.RequireHardenedDeployment = val
 	}
 
 	// Parse governance scan interval
@@ -912,6 +1120,9 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 		}
 		if val, ok := weightsMap["toolScope"].(int64); ok {
 			weights.ToolScope = int(val)
+		}
+		if val, ok := weightsMap["hardenedDeployment"].(int64); ok {
+			weights.HardenedDeployment = int(val)
 		}
 		policy.Weights = weights
 	}

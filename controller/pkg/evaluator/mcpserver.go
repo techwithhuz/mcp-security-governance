@@ -68,14 +68,15 @@ type RelatedResource struct {
 
 // MCPServerScoreBreakdown is the per-category score for a single MCP server.
 type MCPServerScoreBreakdown struct {
-	GatewayRouting int `json:"gatewayRouting"`
-	Authentication int `json:"authentication"`
-	Authorization  int `json:"authorization"`
-	TLS            int `json:"tls"`
-	CORS           int `json:"cors"`
-	RateLimit      int `json:"rateLimit"`
-	PromptGuard    int `json:"promptGuard"`
-	ToolScope      int `json:"toolScope"`
+	GatewayRouting     int `json:"gatewayRouting"`
+	Authentication     int `json:"authentication"`
+	Authorization      int `json:"authorization"`
+	TLS                int `json:"tls"`
+	CORS               int `json:"cors"`
+	RateLimit          int `json:"rateLimit"`
+	PromptGuard        int `json:"promptGuard"`
+	ToolScope          int `json:"toolScope"`
+	HardeningScore     int `json:"hardenedDeployment"`
 }
 
 // ScoreExplanation describes how a single security control score was calculated.
@@ -603,6 +604,23 @@ func collectMCPServerFindings(view *MCPServerView, allFindings []Finding) []Find
 		refs[fmt.Sprintf("Agent/%s/%s", r.Namespace, r.Name)] = true
 	}
 
+	// For RemoteMCPServers, extract the deployment name from the URL
+	// e.g., "http://kagent-tools.kagent:8084/mcp" -> "kagent-tools"
+	var deploymentName string
+	if view.Source == "KagentRemoteMCPServer" && view.URL != "" {
+		// Extract hostname from URL (e.g., "kagent-tools.kagent" from "http://kagent-tools.kagent:8084/mcp")
+		if parts := strings.Split(view.URL, "://"); len(parts) > 1 {
+			hostPort := parts[1]
+			if parts := strings.Split(hostPort, "/"); len(parts) > 0 {
+				hostPort = parts[0]
+			}
+			// Extract just the service name (before the first dot)
+			if parts := strings.Split(hostPort, "."); len(parts) > 0 {
+				deploymentName = parts[0]
+			}
+		}
+	}
+
 	for _, f := range allFindings {
 		// If this MCP server has tool restriction via policy, suppress the raw TOOLS-001 finding
 		// since the effective tool count (after policy enforcement) is what matters
@@ -639,6 +657,11 @@ func collectMCPServerFindings(view *MCPServerView, allFindings []Finding) []Find
 			result = append(result, f)
 			continue
 		}
+		// For RemoteMCPServers, also match by the underlying deployment name
+		if deploymentName != "" && strings.Contains(f.ID, deploymentName) {
+			result = append(result, f)
+			continue
+		}
 		// Cluster-wide findings (no resource ref) that affect all MCP servers
 		if f.ResourceRef == "" && isClusterWideFinding(f) {
 			result = append(result, f)
@@ -661,14 +684,15 @@ func isClusterWideFinding(f Finding) bool {
 // scoreMCPServer calculates the governance score for a single MCP server.
 func scoreMCPServer(view *MCPServerView, policy Policy) {
 	bd := MCPServerScoreBreakdown{
-		GatewayRouting: 100,
-		Authentication: 100,
-		Authorization:  100,
-		TLS:            100,
-		CORS:           100,
-		RateLimit:      100,
-		PromptGuard:    100,
-		ToolScope:      100,
+		GatewayRouting:  100,
+		Authentication:  100,
+		Authorization:   100,
+		TLS:             100,
+		CORS:            100,
+		RateLimit:       100,
+		PromptGuard:     100,
+		ToolScope:       100,
+		HardeningScore:  100,
 	}
 
 	// Gateway routing
@@ -748,6 +772,30 @@ func scoreMCPServer(view *MCPServerView, policy Policy) {
 		bd.ToolScope = 50
 	}
 
+	// Hardening Score — derived from HDN-* findings for this server's namespace/name
+	if policy.RequireHardenedDeployment {
+		bd.HardeningScore = 100
+		hdnPenalty := 0
+		for _, f := range view.Findings {
+			if f.Category == CategoryHardening {
+				switch f.Severity {
+				case SeverityCritical:
+					hdnPenalty += 40
+				case SeverityHigh:
+					hdnPenalty += 25
+				case SeverityMedium:
+					hdnPenalty += 15
+				case SeverityLow:
+					hdnPenalty += 5
+				}
+			}
+		}
+		bd.HardeningScore -= hdnPenalty
+		if bd.HardeningScore < 0 {
+			bd.HardeningScore = 0
+		}
+	}
+
 	view.ScoreBreakdown = bd
 
 	// Weighted average using policy weights
@@ -769,6 +817,7 @@ func scoreMCPServer(view *MCPServerView, policy Policy) {
 		{bd.RateLimit, w.RateLimit, policy.RequireRateLimit},
 		{bd.PromptGuard, w.PromptGuard, policy.RequirePromptGuard},
 		{bd.ToolScope, w.ToolScope, policy.MaxToolsWarning > 0 || policy.MaxToolsCritical > 0 || view.ToolCount == 0},
+		{bd.HardeningScore, w.HardenedDeployment, policy.RequireHardenedDeployment},
 	}
 
 	for _, e := range entries {
@@ -1164,6 +1213,37 @@ func buildScoreExplanations(view *MCPServerView, policy Policy) []ScoreExplanati
 			} else {
 				exp.Reasons = append(exp.Reasons, fmt.Sprintf("Effective tool count (%d) exceeds critical threshold (%d).", view.EffectiveToolCount, policy.MaxToolsCritical))
 				exp.Suggestions = append(exp.Suggestions, "Urgently restrict tool exposure via CEL authorization policies.")
+			}
+		}
+		explanations = append(explanations, exp)
+	}
+
+	// 9. Hardened Deployment
+	{
+		exp := ScoreExplanation{
+			Category: "Hardened Deployment",
+			Score:    bd.HardeningScore,
+			MaxScore: 100,
+		}
+		if !policy.RequireHardenedDeployment {
+			exp.Status = "not-required"
+			exp.Reasons = []string{"Hardened deployment checks are not required by the governance policy."}
+		} else {
+			exp.Status = statusFor(bd.HardeningScore)
+			// Collect all HDN-* finding titles for this server's namespace
+			var hdnReasons []string
+			var hdnSuggestions []string
+			for _, f := range view.Findings {
+				if f.Category == CategoryHardening {
+					hdnReasons = append(hdnReasons, fmt.Sprintf("[%s] %s", f.Severity, f.Title))
+					hdnSuggestions = append(hdnSuggestions, f.Remediation)
+				}
+			}
+			if len(hdnReasons) == 0 {
+				exp.Reasons = []string{"All hardening checks passed: non-root, read-only FS, no priv escalation, cap drop, seccomp, NetworkPolicy, no :latest tag, secret store."}
+			} else {
+				exp.Reasons = hdnReasons
+				exp.Suggestions = hdnSuggestions
 			}
 		}
 		explanations = append(explanations, exp)
