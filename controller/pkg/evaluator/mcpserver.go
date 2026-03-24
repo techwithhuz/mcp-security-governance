@@ -675,7 +675,7 @@ func isClusterWideFinding(f Finding) bool {
 	switch f.ID {
 	case "AGW-001", "AGW-003", "AGW-004", "AUTH-002", "CORS-001", "CORS-002",
 		"CORS-003", "RL-001", "RL-002", "RBAC-001", "RBAC-002", "PG-001", "PG-002",
-		"TLS-002":
+		"TLS-002", "HDN-000":
 		return true
 	}
 	return false
