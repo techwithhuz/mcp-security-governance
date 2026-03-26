@@ -106,10 +106,27 @@ spec:
         app.kubernetes.io/component: controller
     spec:
       serviceAccountName: mcp-governance-controller
+      # Tier 2 #15: Pod-level security context — enforce nonroot, seccomp
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: controller
           image: localhost/mcp-governance-controller:latest
           imagePullPolicy: Never
+          # Tier 2 #15: Container-level security context
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: api
               containerPort: 8090
@@ -187,6 +204,14 @@ spec:
         - name: dashboard
           image: localhost/mcp-governance-dashboard:latest
           imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: 3000

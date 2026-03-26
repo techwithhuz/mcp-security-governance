@@ -364,6 +364,15 @@ func (d *K8sDiscoverer) discoverAgentgatewayBackends(ctx context.Context) []eval
 				tls, _ := getNestedMap(policies, "tls")
 				if tls != nil {
 					b.HasTLS = true
+					// Tier 2 #19: detect client certificate for mTLS
+					clientCert, _ := getNestedMap(tls, "clientCertificate")
+					if clientCert != nil {
+						b.HasClientCert = true
+					}
+					clientCertRef, _ := getNestedString(tls, "clientCertificateRef")
+					if clientCertRef != "" {
+						b.HasClientCert = true
+					}
 				}
 			}
 		}
@@ -433,6 +442,16 @@ func (d *K8sDiscoverer) discoverAgentgatewayPolicies(ctx context.Context) []eval
 					mode, _ := getNestedString(jwt, "mode")
 					if mode != "" {
 						p.JWTMode = mode
+					}
+					// Tier 2 #18: extract audience list
+					if audiences, ok := jwt["audiences"]; ok {
+						if audList, ok := audiences.([]interface{}); ok {
+							for _, a := range audList {
+								if s, ok := a.(string); ok {
+									p.JWTAudiences = append(p.JWTAudiences, s)
+								}
+							}
+						}
 					}
 				}
 
@@ -530,6 +549,16 @@ func (d *K8sDiscoverer) discoverAgentgatewayPolicies(ctx context.Context) []eval
 					mode, _ := getNestedString(jwt, "mode")
 					if mode != "" {
 						p.JWTMode = mode
+					}
+					// Tier 2 #18: extract audience list from fallback format too
+					if audiences, ok := jwt["audiences"]; ok {
+						if audList, ok := audiences.([]interface{}); ok {
+							for _, a := range audList {
+								if s, ok := a.(string); ok {
+									p.JWTAudiences = append(p.JWTAudiences, s)
+								}
+							}
+						}
 					}
 				}
 				cors, _ := getNestedMap(defaults, "cors")
@@ -1051,6 +1080,14 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 	}
 	if val, ok := spec["requireHardenedDeployment"].(bool); ok {
 		policy.RequireHardenedDeployment = val
+	}
+
+	// Tier 2 #16: audit logging fields
+	if val, ok := spec["enableAuditLogging"].(bool); ok {
+		policy.EnableAuditLogging = val
+	}
+	if val, ok := spec["clusterName"].(string); ok {
+		policy.ClusterName = val
 	}
 
 	// Parse governance scan interval

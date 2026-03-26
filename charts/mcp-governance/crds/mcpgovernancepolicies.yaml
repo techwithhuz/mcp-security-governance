@@ -47,6 +47,17 @@ spec:
                   type: boolean
                   default: true
                   description: "Enforces container security context, NetworkPolicy coverage, and image hygiene checks"
+                scanInterval:
+                  type: string
+                  default: "5m"
+                  description: "Interval between governance scans (e.g. '30s', '5m', '10m', '1h'). Default: '5m'"
+                enableAuditLogging:
+                  type: boolean
+                  default: false
+                  description: "Tier 2 #16: emit structured JSON audit events to stdout on every evaluation"
+                clusterName:
+                  type: string
+                  description: "Tier 2 #16: cluster identifier included in audit log events"
                 maxToolsWarning:
                   type: integer
                   default: 10
@@ -198,6 +209,9 @@ spec:
                         type: string
                       message:
                         type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
                       lastTransitionTime:
                         type: string
                         format: date-time

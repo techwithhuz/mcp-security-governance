@@ -1357,6 +1357,190 @@ status:
 
         {/* Configuration Deep Dive removed */}
       </section>
+
+      {/* ── Tier 2 OWASP Security Controls ── */}
+      <section>
+        <SectionHeader
+          icon={ShieldAlert}
+          color="#f97316"
+          title="Tier 2 OWASP Security Controls"
+          subtitle="Advanced security hardening built into MCP-G — beyond the baseline"
+        />
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[
+            {
+              id: '#15',
+              title: 'Controller Dockerfile Hardening',
+              icon: Lock,
+              color: '#059669',
+              badge: 'Infrastructure',
+              points: [
+                'Runs as non-root UID 65532 (distroless nonroot)',
+                'Binary permissions chmod 550 (no write access)',
+                'Pod-level seccompProfile: RuntimeDefault',
+                'readOnlyRootFilesystem: true on container',
+                'capabilities: drop: [ALL]',
+                'allowPrivilegeEscalation: false',
+              ],
+              note: 'Applied to the MCP-G controller itself — the governance engine leads by example.',
+            },
+            {
+              id: '#16',
+              title: 'Structured Audit Logging',
+              icon: Eye,
+              color: '#3b82f6',
+              badge: 'Observability',
+              points: [
+                'Every evaluation emits JSON audit events to stdout',
+                'Events: EVALUATION, FINDING, SCORE_CHANGE, POLICY',
+                'Unique evaluationId ties all events per scan',
+                'Per-server score breakdowns logged after each run',
+                'Compatible with any log aggregator (ELK, Loki, etc.)',
+                'Enabled via policy.enableAuditLogging: true',
+              ],
+              note: 'Audit events are structured for SIEM ingestion. Finding ID, severity, and category are always present.',
+            },
+            {
+              id: '#17',
+              title: 'CI/CD Security Gates',
+              icon: GitBranch,
+              color: '#8b5cf6',
+              badge: 'Supply Chain',
+              points: [
+                'make trivy — image scan for HIGH/CRITICAL CVEs',
+                'make gosec — Go static security analysis (JSON report)',
+                'make lint — golangci-lint with security linters',
+                'make security-scan — runs all three gates in sequence',
+                'Gates are designed to fail the pipeline on critical findings',
+                'Reports written to gosec-report.json for review',
+              ],
+              note: 'Run make security-scan before any image push to catch vulnerabilities before they reach the cluster.',
+            },
+            {
+              id: '#18',
+              title: 'JWT Audience Scope Check',
+              icon: FileKey,
+              color: '#6366f1',
+              badge: 'Authentication',
+              finding: 'AUTH-005',
+              points: [
+                'Flags policies with empty JWT audiences',
+                'Flags policies using wildcard audience "*"',
+                'Prevents cross-service token-reuse attacks',
+                'HIGH severity — tokens for any service are accepted',
+                'Remediation: set audiences: ["mcp-gateway"]',
+                'Discovered from jwtAuthentication.audiences in AgentgatewayPolicy',
+              ],
+              note: 'A token minted for "payments-service" should never be valid on your MCP gateway. Restrict audiences explicitly.',
+            },
+            {
+              id: '#19',
+              title: 'Mutual TLS (mTLS) Check',
+              icon: Shield,
+              color: '#a855f7',
+              badge: 'TLS',
+              finding: 'TLS-003',
+              points: [
+                'Flags backends with TLS enabled but no client certificate',
+                'One-way TLS cannot verify controller identity to upstream',
+                'MEDIUM severity per backend without client cert',
+                'Checks spec.policies.tls.clientCertificate in AgentgatewayBackend',
+                'Remediation: add a cert-manager Certificate or TLS Secret ref',
+                'Complements the existing TLS-001 / TLS-002 backend checks',
+              ],
+              note: 'TLS without a client cert only encrypts the channel — the upstream MCP server cannot prove it is talking to the authorized controller.',
+            },
+            {
+              id: '#14',
+              title: 'Image Signature Annotation',
+              icon: ShieldCheck,
+              color: '#10b981',
+              badge: 'Supply Chain',
+              finding: 'HDN-010',
+              points: [
+                'Checks for cosign/sigstore signature annotation',
+                'Looks for org.opencontainers.image.vendor label',
+                'LOW severity if annotation missing from Deployment',
+                'Part of the Hardened Deployment scoring category',
+                'Supply-chain integrity assurance for MCP server images',
+                'Integrate with Sigstore or Notary for full verification',
+              ],
+              note: 'Pair with an OPA/Kyverno policy that blocks unsigned images at admission time for full enforcement.',
+            },
+          ].map(item => {
+            const Icon = item.icon;
+            return (
+              <div key={item.id} className="bg-gov-surface rounded-2xl border border-gov-border p-5 hover:border-gov-border-light transition-all">
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2.5 rounded-xl flex-shrink-0" style={{ backgroundColor: `${item.color}15` }}>
+                      <Icon size={18} style={{ color: item.color }} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-md border"
+                          style={{ color: item.color, borderColor: `${item.color}30`, backgroundColor: `${item.color}10` }}>
+                          OWASP {item.id}
+                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-gov-bg text-gov-text-3 border border-gov-border">
+                          {item.badge}
+                        </span>
+                        {item.finding && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                            {item.finding}
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="text-sm font-bold text-gov-text mt-1.5">{item.title}</h3>
+                    </div>
+                  </div>
+                </div>
+                <ul className="space-y-1.5 mb-4">
+                  {item.points.map(pt => (
+                    <li key={pt} className="flex items-start gap-2 text-xs text-gov-text-2">
+                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1" style={{ backgroundColor: item.color }}></span>
+                      {pt}
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-gov-bg border border-gov-border">
+                  <Info size={12} className="text-gov-text-3 flex-shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-gov-text-3 leading-relaxed">{item.note}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Tier 2 checklist */}
+        <div className="mt-6 bg-gov-surface rounded-2xl border border-gov-border overflow-hidden">
+          <div className="px-5 py-4 border-b border-gov-border flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-orange-400" />
+            <span className="text-sm font-bold text-gov-text-2 uppercase tracking-wider">Tier 2 Compliance Checklist</span>
+          </div>
+          <div className="divide-y divide-gov-border">
+            {[
+              { check: 'Controller image built with non-root user (UID 65532)', done: true },
+              { check: 'Deployment securityContext: readOnlyRootFilesystem + drop ALL caps', done: true },
+              { check: 'Audit logging enabled in MCPGovernancePolicy (enableAuditLogging: true)', done: true },
+              { check: 'JWT audience restricted (not empty, not "*")', done: true },
+              { check: 'Backend TLS includes client certificate for mTLS', done: true },
+              { check: 'Image signed with cosign and annotation present on Deployment', done: true },
+              { check: 'make security-scan passes in CI before image push', done: true },
+            ].map(({ check, done }) => (
+              <div key={check} className="px-5 py-3 flex items-center gap-3">
+                <CheckCircle2 size={15} className={done ? 'text-green-400' : 'text-gov-text-3'} />
+                <span className="text-sm text-gov-text flex-1">{check}</span>
+                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${
+                  done ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-gov-bg text-gov-text-3 border border-gov-border'
+                }`}>
+                  {done ? 'Implemented' : 'Pending'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

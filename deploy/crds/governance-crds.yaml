@@ -51,6 +51,13 @@ spec:
                   type: string
                   default: "5m"
                   description: "Interval between governance scans (e.g. '30s', '5m', '10m', '1h'). Default: '5m'"
+                enableAuditLogging:
+                  type: boolean
+                  default: false
+                  description: "Tier 2 #16: emit structured JSON audit events to stdout on every evaluation"
+                clusterName:
+                  type: string
+                  description: "Tier 2 #16: cluster identifier included in audit log events"
                 maxToolsWarning:
                   type: integer
                   default: 10
@@ -336,6 +343,10 @@ spec:
                       type: integer
                     rateLimitScore:
                       type: integer
+                    toolScopeScore:
+                      type: integer
+                    hardenedDeploymentScore:
+                      type: integer
                 namespaceScores:
                   type: array
                   items:
@@ -353,6 +364,101 @@ spec:
                 findingsCount:
                   type: integer
                   description: "Total number of findings detected"
+                mcpServerScores:
+                  type: array
+                  description: "Per-MCP-server governance scores"
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      source:
+                        type: string
+                      status:
+                        type: string
+                      score:
+                        type: integer
+                      toolCount:
+                        type: integer
+                      effectiveToolCount:
+                        type: integer
+                      criticalFindings:
+                        type: integer
+                      lastEvaluated:
+                        type: string
+                        format: date-time
+                      scoreBreakdown:
+                        type: object
+                        properties:
+                          gatewayRouting:
+                            type: integer
+                          authentication:
+                            type: integer
+                          authorization:
+                            type: integer
+                          tls:
+                            type: integer
+                          cors:
+                            type: integer
+                          rateLimit:
+                            type: integer
+                          promptGuard:
+                            type: integer
+                          toolScope:
+                            type: integer
+                          hardenedDeployment:
+                            type: integer
+                      relatedResources:
+                        type: object
+                        properties:
+                          gateways:
+                            type: integer
+                          backends:
+                            type: integer
+                          policies:
+                            type: integer
+                          routes:
+                            type: integer
+                verifiedCatalogScores:
+                  type: array
+                  description: "Per-catalog governance scores from Agent Registry"
+                  items:
+                    type: object
+                    properties:
+                      catalogName:
+                        type: string
+                      namespace:
+                        type: string
+                      resourceVersion:
+                        type: string
+                      status:
+                        type: string
+                      compositeScore:
+                        type: integer
+                      securityScore:
+                        type: integer
+                      trustScore:
+                        type: integer
+                      complianceScore:
+                        type: integer
+                      lastScored:
+                        type: string
+                        format: date-time
+                      checks:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            name:
+                              type: string
+                            points:
+                              type: integer
+                            maxPoints:
+                              type: integer
       subresources:
         status: {}
       additionalPrinterColumns:

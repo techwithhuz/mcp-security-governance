@@ -78,6 +78,32 @@ func DefaultWatchedResources() []WatchedResource {
 				Group: "agentregistry.dev", Version: "v1alpha1", Resource: "mcpservercatalogs",
 			},
 		},
+		// Standard Kubernetes resources — changes to these affect hardening scores,
+		// network policy scores, and MCP server routing.
+		{
+			Label: "Deployment",
+			GVR: schema.GroupVersionResource{
+				Group: "apps", Version: "v1", Resource: "deployments",
+			},
+		},
+		{
+			Label: "StatefulSet",
+			GVR: schema.GroupVersionResource{
+				Group: "apps", Version: "v1", Resource: "statefulsets",
+			},
+		},
+		{
+			Label: "NetworkPolicy",
+			GVR: schema.GroupVersionResource{
+				Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies",
+			},
+		},
+		{
+			Label: "Service",
+			GVR: schema.GroupVersionResource{
+				Group: "", Version: "v1", Resource: "services",
+			},
+		},
 	}
 }
 
@@ -176,10 +202,18 @@ func (w *ResourceWatcher) Start(ctx context.Context) {
 			// Skip status-only updates by comparing metadata.generation.
 			// When only .status changes, the generation stays the same.
 			// This prevents a reconcile loop: scan → update status → watch event → scan → ...
+			// NOTE: non-generational resources (NetworkPolicy, Service, etc.) always have
+			// generation=0, so we must not apply this filter to them — always reconcile.
 			oldU, oldOk := old.(*unstructured.Unstructured)
 			newU, newOk := new.(*unstructured.Unstructured)
-			if oldOk && newOk && oldU.GetGeneration() == newU.GetGeneration() && oldU.GetGeneration() > 0 {
-				return // status-only update, skip
+			if oldOk && newOk {
+				oldGen := oldU.GetGeneration()
+				newGen := newU.GetGeneration()
+				// Only skip if the resource actually tracks generation (generation > 0)
+				// AND the generation hasn't changed (pure status update).
+				if oldGen > 0 && newGen > 0 && oldGen == newGen {
+					return // status-only update, skip
+				}
 			}
 			w.onEvent("update", new)
 		},
