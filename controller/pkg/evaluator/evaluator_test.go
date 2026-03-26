@@ -38,6 +38,7 @@ func fullCompliantState() *ClusterState {
 			{
 				Name: "security-policy", Namespace: "agentgateway-system",
 				HasJWT: true, JWTMode: "Strict",
+				JWTAudiences: []string{"mcp-gateway"}, // Tier 2 #18: scoped audience → no AUTH-005
 				HasCORS: true, HasCSRF: true,
 				HasRBAC: true, HasRateLimit: true, HasPromptGuard: true,
 			},
@@ -1652,7 +1653,7 @@ func TestEvaluate_CustomWeights(t *testing.T) {
 		AgentgatewayBackends: []AgentgatewayBackendResource{
 			{
 				Name: "mcp-backend", Namespace: "mcp-system", BackendType: "mcp",
-				HasTLS: true,
+				HasTLS: true, HasClientCert: true, // Tier 2 #19: mTLS → no TLS-003
 				MCPTargets: []MCPTargetInfo{
 					{Name: "my-mcp", Host: "my-mcp.mcp-system.svc.cluster.local", Port: 8080},
 				},
