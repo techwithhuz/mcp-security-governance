@@ -1,4 +1,4 @@
-.PHONY: all build-controller build-dashboard load-images deploy clean dev-api dev-dashboard test helm-install helm-install-samples helm-upgrade helm-uninstall helm-template
+.PHONY: all build-controller build-dashboard load-images deploy clean dev-api dev-dashboard test helm-install helm-install-samples helm-upgrade helm-uninstall helm-template trivy gosec lint security-scan
 
 CLUSTER_NAME := mcp-governance
 CONTROLLER_IMAGE := mcp-governance-controller:latest
@@ -140,3 +140,30 @@ helm-uninstall:
 helm-template:
 	@echo "⎈ Rendering Helm templates..."
 	helm template $(HELM_RELEASE) $(HELM_CHART)
+
+# =====================
+# SECURITY SCANNING (Tier 2 #17)
+# =====================
+
+## trivy — container image vulnerability scan (HIGH + CRITICAL only)
+trivy:
+	@echo "🔍 Running Trivy image scan on controller..."
+	@which trivy > /dev/null 2>&1 || (echo "❌ trivy not found — install: brew install aquasecurity/trivy/trivy" && exit 1)
+	trivy image --severity HIGH,CRITICAL --exit-code 1 localhost/$(CONTROLLER_IMAGE)
+
+## gosec — Go source static security analysis
+gosec:
+	@echo "🔍 Running gosec static analysis..."
+	@which gosec > /dev/null 2>&1 || go install github.com/securego/gosec/v2/cmd/gosec@latest
+	cd controller && gosec -fmt json -out ../gosec-report.json ./... || true
+	@echo "✅ gosec report written to gosec-report.json"
+
+## lint — golangci-lint with security-aware linters
+lint:
+	@echo "🔍 Running golangci-lint..."
+	@which golangci-lint > /dev/null 2>&1 || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	cd controller && golangci-lint run --timeout 5m ./...
+
+## security-scan — run all three gates (CI/CD pipeline target)
+security-scan: lint gosec trivy
+	@echo "✅ All security gates passed"

@@ -740,6 +740,16 @@ func scoreMCPServer(view *MCPServerView, policy Policy) {
 			bd.Authentication = 70
 		}
 	}
+	// Tier 2 #18: penalise for overly-broad JWT audience (AUTH-005) even when JWT is present.
+	// AUTH-005 is High severity → deduct 25 points per occurrence so the score reflects the issue.
+	for _, f := range view.Findings {
+		if strings.HasPrefix(f.ID, "AUTH-005-") {
+			bd.Authentication -= severityPenalty(f.Severity, policy.SeverityPenalties)
+		}
+	}
+	if bd.Authentication < 0 {
+		bd.Authentication = 0
+	}
 
 	// Authorization
 	if policy.RequireRBAC {
@@ -753,6 +763,16 @@ func scoreMCPServer(view *MCPServerView, policy Policy) {
 		if !view.HasTLS {
 			bd.TLS = 0
 		}
+	}
+	// Tier 2 #19: penalise for one-way TLS (TLS-003) even when TLS is present.
+	// TLS-003 is Medium severity → deduct 15 points per occurrence.
+	for _, f := range view.Findings {
+		if strings.HasPrefix(f.ID, "TLS-003-") {
+			bd.TLS -= severityPenalty(f.Severity, policy.SeverityPenalties)
+		}
+	}
+	if bd.TLS < 0 {
+		bd.TLS = 0
 	}
 
 	// CORS
@@ -1087,6 +1107,13 @@ func buildScoreExplanations(view *MCPServerView, policy Policy) []ScoreExplanati
 				exp.Reasons = append(exp.Reasons, "No authentication is configured.")
 				exp.Suggestions = append(exp.Suggestions, "Create an AgentgatewayPolicy with traffic.jwtAuthentication targeting your Gateway or HTTPRoute.")
 			}
+			// Tier 2 #18: surface AUTH-005 audience-scope issues in the pop-up
+			for _, f := range view.Findings {
+				if strings.HasPrefix(f.ID, "AUTH-005-") {
+					exp.Reasons = append(exp.Reasons, fmt.Sprintf("[%s] %s", f.Severity, f.Title))
+					exp.Suggestions = append(exp.Suggestions, f.Remediation)
+				}
+			}
 		}
 		explanations = append(explanations, exp)
 	}
@@ -1135,6 +1162,13 @@ func buildScoreExplanations(view *MCPServerView, policy Policy) []ScoreExplanati
 			} else {
 				exp.Reasons = append(exp.Reasons, "No TLS encryption is configured.")
 				exp.Suggestions = append(exp.Suggestions, "Add spec.policies.tls with an SNI to the AgentgatewayBackend for encrypted backend connections.")
+			}
+			// Tier 2 #19: surface TLS-003 mTLS issues in the pop-up
+			for _, f := range view.Findings {
+				if strings.HasPrefix(f.ID, "TLS-003-") {
+					exp.Reasons = append(exp.Reasons, fmt.Sprintf("[%s] %s", f.Severity, f.Title))
+					exp.Suggestions = append(exp.Suggestions, f.Remediation)
+				}
 			}
 		}
 		explanations = append(explanations, exp)

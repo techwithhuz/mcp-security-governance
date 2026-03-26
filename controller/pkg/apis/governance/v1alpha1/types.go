@@ -44,6 +44,14 @@ type MCPGovernancePolicySpec struct {
 	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
 	// ExcludeNamespaces is the list of namespaces to exclude from monitoring
 	ExcludeNamespaces []string `json:"excludeNamespaces,omitempty"`
+	// RequireHardenedDeployment enables container security hardening checks (runAsNonRoot, readOnlyRootFilesystem, etc.)
+	RequireHardenedDeployment bool `json:"requireHardenedDeployment,omitempty"`
+	// ScanInterval is the interval between governance evaluations (e.g. "5m", "10m", "1h")
+	ScanInterval string `json:"scanInterval,omitempty"`
+	// EnableAuditLogging enables structured JSON audit events on every evaluation (Tier 2 #16)
+	EnableAuditLogging bool `json:"enableAuditLogging,omitempty"`
+	// ClusterName is the identifier for this cluster included in audit log events (Tier 2 #16)
+	ClusterName string `json:"clusterName,omitempty"`
 	// VerifiedCatalogScoring configures scoring thresholds, category weights, and per-check max scores
 	// for the Verified Catalog (MCPServerCatalog inventory) scoring model.
 	VerifiedCatalogScoring *VerifiedCatalogScoringConfig `json:"verifiedCatalogScoring,omitempty"`

@@ -24,10 +24,27 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # Tier 2 #15: Pod-level security context — enforce nonroot user and seccomp
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: controller
           image: {{ include "mcp-governance.controllerImage" . }}
           imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          # Tier 2 #15: Container-level security context — drop all capabilities, read-only FS
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: api
               containerPort: {{ .Values.controller.port }}

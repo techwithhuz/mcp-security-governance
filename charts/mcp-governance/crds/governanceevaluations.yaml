@@ -106,6 +106,8 @@ spec:
                       type: integer
                     rateLimitScore:
                       type: integer
+                    toolScopeScore:
+                      type: integer
                     hardenedDeploymentScore:
                       type: integer
                 namespaceScores:

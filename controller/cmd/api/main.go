@@ -378,9 +378,6 @@ func handleScore(w http.ResponseWriter, r *http.Request) {
 			func(v evaluator.MCPServerView) int { return v.ScoreBreakdown.HardeningScore }},
 	}
 
-	// DEBUG: Log policy.RequireHardenedDeployment status
-	log.Printf("[api] handleScore: RequireHardenedDeployment=%v, HardenedDeployment weight=%d", snap.policy.RequireHardenedDeployment, pw.HardenedDeployment)
-
 	totalWeight := 0
 	var cats []categoryDetail
 
