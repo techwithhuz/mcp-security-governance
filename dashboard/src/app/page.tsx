@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Image from 'next/image';
-import { Shield, RefreshCw, Activity, Clock, AlertTriangle, Wifi, WifiOff, Server, ChevronRight, Plug, Scan, Wrench, BadgeCheck, Info, Github } from 'lucide-react';
+import { Shield, RefreshCw, Activity, Clock, AlertTriangle, Wifi, WifiOff, Server, ChevronRight, Plug, Scan, Wrench, BadgeCheck, Info, Github, BookOpen } from 'lucide-react';
 import ScoreGauge from '@/components/ScoreGauge';
 import ResourceCards from '@/components/ResourceCards';
 import FindingsTable from '@/components/FindingsTable';
@@ -14,8 +14,9 @@ import AIScoreCard from '@/components/AIScoreCard';
 import MCPServerList from '@/components/MCPServerList';
 import MCPServerDetail from '@/components/MCPServerDetail';
 import VerifiedCatalog from '@/components/VerifiedCatalog';
+import SkillCatalog from '@/components/SkillCatalog';
 import InfoPage from '@/components/InfoPage';
-import type { MCPServerView, MCPServerSummary, MCPServersResponse, VerifiedResource, VerifiedSummary, VerifiedCatalogResponse, VerifiedInventory } from '@/lib/types';
+import type { MCPServerView, MCPServerSummary, MCPServersResponse, VerifiedResource, VerifiedSummary, VerifiedCatalogResponse, VerifiedInventory, SkillCatalogsResponse } from '@/lib/types';
 
 interface DashboardData {
   score: { score: number; grade: string; phase: string; categories: any[]; explanation: string; severityPenalties?: { Critical: number; High: number; Medium: number; Low: number } };
@@ -26,6 +27,7 @@ interface DashboardData {
   resourceDetail: { resources: any[]; total: number };
   mcpServers: MCPServersResponse;
   verifiedCatalog: VerifiedCatalogResponse;
+  skillCatalogs: SkillCatalogsResponse;
 }
 
 export default function Dashboard() {
@@ -34,10 +36,10 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | 'info'>('overview');
+  const [activeTab, setActiveTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | 'skill-catalogs' | 'info'>('overview');
   const [version, setVersion] = useState('');
   const [selectedMCPServer, setSelectedMCPServer] = useState<MCPServerView | null>(null);
-  const [previousTab, setPreviousTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | 'info' | null>(null);
+  const [previousTab, setPreviousTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | 'skill-catalogs' | 'info' | null>(null);
   const [lastScanTime, setLastScanTime] = useState<string>('');
   const [scanInterval, setScanInterval] = useState<string>('');
   const [scanning, setScanning] = useState(false);
@@ -49,7 +51,7 @@ export default function Dashboard() {
   const fetchData = useCallback(async () => {
     try {
       setRefreshing(true);
-      const [score, findings, resources, breakdown, trends, resourceDetail, mcpServers, verifiedCatalog, health] = await Promise.all([
+      const [score, findings, resources, breakdown, trends, resourceDetail, mcpServers, verifiedCatalog, skillCatalogs, health] = await Promise.all([
         fetch('/api/governance/score').then(r => r.json()),
         fetch('/api/governance/findings').then(r => r.json()),
         fetch('/api/governance/resources').then(r => r.json()),
@@ -58,13 +60,14 @@ export default function Dashboard() {
         fetch('/api/governance/resources/detail').then(r => r.json()),
         fetch('/api/governance/mcp-servers').then(r => r.json()).catch(() => ({ servers: [], summary: {} })),
         fetch('/api/governance/inventory/verified').then(r => r.json()).catch(() => ({ resources: [], summary: { totalCatalogs: 0, totalScored: 0, verifiedCount: 0, unverifiedCount: 0, rejectedCount: 0, pendingCount: 0, warningCount: 0, criticalCount: 0, averageScore: 0, totalTools: 0, totalAgentUsages: 0, lastReconcile: '' } })),
+        fetch('/api/governance/skill-catalogs').then(r => r.json()).catch(() => ({ catalogs: [], summary: { total: 0, passCount: 0, warningCount: 0, failCount: 0, averageScore: 0 } })),
         fetch('/api/health').then(r => r.json()).catch(() => null),
       ]);
 
       if (health?.version) setVersion(health.version);
       if (health?.lastScanTime) setLastScanTime(health.lastScanTime);
       if (health?.scanInterval) setScanInterval(health.scanInterval);
-      setData({ score, findings, resources, breakdown, trends, resourceDetail, mcpServers, verifiedCatalog });
+      setData({ score, findings, resources, breakdown, trends, resourceDetail, mcpServers, verifiedCatalog, skillCatalogs });
       setConnected(true);
       setError(null);
 
@@ -225,6 +228,7 @@ export default function Dashboard() {
               { id: 'overview' as const, label: 'Overview', icon: Activity },
               { id: 'mcp-servers' as const, label: 'MCP Servers', icon: Plug },
               { id: 'verified-catalog' as const, label: 'Verified Catalog', icon: BadgeCheck },
+              { id: 'skill-catalogs' as const, label: 'Skill Catalogs', icon: BookOpen },
               { id: 'resources' as const, label: 'Resource Inventory', icon: Server },
               { id: 'findings' as const, label: 'All Findings', icon: AlertTriangle },
               { id: 'info' as const, label: 'About MCP-G', icon: Info },
@@ -248,6 +252,11 @@ export default function Dashboard() {
                 {tab.id === 'verified-catalog' && data.verifiedCatalog?.summary?.totalCatalogs > 0 && (
                   <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-green-500/15 text-green-400 font-bold tabular-nums">
                     {data.verifiedCatalog.summary.totalCatalogs}
+                  </span>
+                )}
+                {tab.id === 'skill-catalogs' && (data.skillCatalogs?.summary?.total ?? 0) > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-purple-500/15 text-purple-400 font-bold tabular-nums">
+                    {data.skillCatalogs.summary.total}
                   </span>
                 )}
                 {tab.id === 'resources' && (
@@ -325,7 +334,11 @@ export default function Dashboard() {
         {/* ========== INFO TAB ========== */}
         {activeTab === 'info' && <InfoPage />}
 
-        {/* ========== OVERVIEW TAB ========== */}
+        {/* ========== SKILL CATALOGS TAB ========== */}
+        {activeTab === 'skill-catalogs' && (
+          <SkillCatalog data={data.skillCatalogs} />
+        )}
+
         {activeTab === 'overview' && (
           <>
             {/* Top row: Score Gauge + MCP Server Summary + Breakdown */}

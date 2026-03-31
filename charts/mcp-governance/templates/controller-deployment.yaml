@@ -78,3 +78,12 @@ spec:
             periodSeconds: {{ .Values.controller.readinessProbe.periodSeconds }}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
+          volumeMounts:
+            - name: skill-patterns
+              mountPath: /etc/mcp-governance/skill-patterns
+              readOnly: true
+      volumes:
+        - name: skill-patterns
+          configMap:
+            name: mcp-governance-skill-patterns
+            optional: true

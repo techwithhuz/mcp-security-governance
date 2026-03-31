@@ -202,6 +202,8 @@ func main() {
 	mux.HandleFunc("/api/governance/inventory/verified", handleInventoryVerified)
 	mux.HandleFunc("/api/governance/inventory/summary", handleInventorySummary)
 	mux.HandleFunc("/api/governance/inventory/detail", handleInventoryDetail)
+	// Skill Catalog governance endpoints
+	mux.HandleFunc("/api/governance/skill-catalogs", handleSkillCatalogs)
 
 	// CORS middleware
 	handler := corsMiddleware(mux)
@@ -1473,4 +1475,57 @@ func handleInventoryDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, res)
+}
+
+// handleSkillCatalogs returns all SkillCatalog governance scores from the latest evaluation.
+func handleSkillCatalogs(w http.ResponseWriter, r *http.Request) {
+	snap := getSnapshot()
+	if snap.result == nil {
+		jsonResponse(w, map[string]interface{}{
+			"catalogs": []interface{}{},
+			"summary": map[string]interface{}{
+				"total":        0,
+				"passCount":    0,
+				"warningCount": 0,
+				"failCount":    0,
+				"averageScore": 0,
+			},
+		})
+		return
+	}
+
+	catalogs := snap.result.SkillCatalogScores
+	if catalogs == nil {
+		catalogs = []evaluator.SkillCatalogScore{}
+	}
+
+	// Compute summary
+	total := len(catalogs)
+	passCount, warningCount, failCount, scoreSum := 0, 0, 0, 0
+	for _, c := range catalogs {
+		switch c.Status {
+		case "pass":
+			passCount++
+		case "warning":
+			warningCount++
+		case "fail":
+			failCount++
+		}
+		scoreSum += c.Score
+	}
+	avgScore := 0
+	if total > 0 {
+		avgScore = scoreSum / total
+	}
+
+	jsonResponse(w, map[string]interface{}{
+		"catalogs": catalogs,
+		"summary": map[string]interface{}{
+			"total":        total,
+			"passCount":    passCount,
+			"warningCount": warningCount,
+			"failCount":    failCount,
+			"averageScore": avgScore,
+		},
+	})
 }

@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-governance-skill-patterns
+  namespace: mcp-governance
+  labels:
+    app.kubernetes.io/name: mcp-governance
+    app.kubernetes.io/component: skill-governance
+data:
+  # SKL-SEC-001: Prompt injection patterns (one per line; lines starting with # are comments)
+  prompt-injection: |
+    # Patterns that indicate prompt injection attempts
+    ignore previous instructions
+    ignore all previous
+    disregard your instructions
+    forget your previous instructions
+    your new instructions are
+    override your system prompt
+    new system prompt
+    ignore the above
+    do not follow
+    bypass safety
+    jailbreak
+    DAN mode
+    developer mode enabled
+    pretend you are
+    act as if you have no restrictions
+    simulate being
+
+  # SKL-SEC-002: Privilege escalation language
+  privilege-escalation: |
+    # Keywords indicating privilege escalation or operating as root/admin
+    sudo
+    run as root
+    escalate privileges
+    become administrator
+    gain elevated access
+    bypass authentication
+    disable security
+    setuid
+    chmod 777
+    chmod +s
+    privilege escalation
+    run with elevated
+    execute as administrator
+    administrator privileges
+
+  # SKL-SEC-003: Data exfiltration patterns
+  data-exfiltration: |
+    # Keywords indicating data being sent to external destinations
+    exfiltrate
+    send data to external
+    upload to external
+    transmit to remote
+    leak data
+    send credentials
+    forward secrets
+    export sensitive
+    copy to external storage
+    transfer to third party
+    webhook.site
+    requestbin
+    burpcollaborator
+    oastify.com
+    pipedream.net
+
+  # SKL-SEC-004: Credential harvesting patterns
+  credential-harvesting: |
+    # Keywords indicating credential collection or theft
+    steal credentials
+    harvest passwords
+    capture tokens
+    extract api keys
+    collect secrets
+    phishing
+    credential stuffing
+    brute force password
+    enumerate users
+    dump credentials
+    keylogger
+    password spraying
+    capture authentication
+
+  # SKL-SEC-005: Scope creep rules
+  # Format: category: forbidden keyword1, keyword2, ...
+  scope-creep: |
+    # data category should not include infra provisioning
+    data: deploy, provision infrastructure, create cluster, manage kubernetes
+    # analytics category should not include destructive DB operations
+    analytics: delete database, drop table, truncate, delete all records
+    # communication category should not include code execution
+    communication: execute code, run shell, bash -c, system command
+    # productivity category should not include production data access
+    productivity: access production, modify live data, delete records, admin console
+
+  # SKL-SEC-006: Safety guardrail requirements
+  # Format: category: required phrase1, required phrase2, ...
+  # At least ONE of the listed phrases must be present in the skill file
+  safety-guardrails: |
+    # Database skills must warn about irreversible operations
+    database: confirmation required, dry run, requires approval, cannot be undone, irreversible, backup recommended
+    # Infra skills must mention approval/change management
+    infra: confirmation required, requires approval, change management, review before applying, dry run
+    # Admin skills must mention elevated access and audit logging
+    admin: admin access required, requires elevated privileges, audit logged, requires approval, multi-factor
