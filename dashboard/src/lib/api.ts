@@ -15,10 +15,12 @@ import {
   VerifiedResource,
 } from './types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
-
+/**
+ * All API calls go through the Next.js proxy at /api/governance/[...path]
+ * which forwards to the MCP Governance Controller using CONTROLLER_API_URL env var.
+ */
 async function fetchAPI<T>(endpoint: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
+  const res = await fetch(endpoint, {
     cache: 'no-store',
   });
   if (!res.ok) {
