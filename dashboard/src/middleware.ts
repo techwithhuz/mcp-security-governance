@@ -10,15 +10,12 @@ import { NextRequest, NextResponse } from 'next/server';
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  console.log('[middleware] Intercepted request:', pathname);
-
   // Skip rewrite for local scan endpoints (handled by Next.js route handlers)
   if (pathname.startsWith('/api/scan/') || pathname.startsWith('/api/governance/scan/')) {
-    console.log('[middleware] Skipping rewrite for scan endpoint');
     return NextResponse.next();
   }
 
-  console.log('[middleware] Rewriting to controller:', pathname);
+
   const controllerUrl =
     process.env.CONTROLLER_API_URL || 'http://localhost:8090';
 

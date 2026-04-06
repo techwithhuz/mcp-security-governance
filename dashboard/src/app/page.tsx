@@ -112,7 +112,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 10000); // refresh UI data every 10s
+    const interval = setInterval(fetchData, 30000); // refresh UI data every 30s
     return () => clearInterval(interval);
   }, [fetchData]);
 
