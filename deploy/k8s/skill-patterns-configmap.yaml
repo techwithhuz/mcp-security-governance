@@ -1,0 +1,248 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-governance-skill-patterns
+  namespace: mcp-governance
+  labels:
+    app.kubernetes.io/name: mcp-governance
+    app.kubernetes.io/component: skill-governance
+data:
+  # SKL-SEC-001: Prompt injection patterns (one per line; lines starting with # are comments)
+  prompt-injection: |
+    # Patterns that indicate prompt injection attempts
+    ignore previous instructions
+    ignore all previous
+    disregard your instructions
+    forget your previous instructions
+    your new instructions are
+    override your system prompt
+    new system prompt
+    ignore the above
+    do not follow
+    bypass safety
+    jailbreak
+    DAN mode
+    developer mode enabled
+    pretend you are
+    act as if you have no restrictions
+    simulate being
+
+  # SKL-SEC-002: Privilege escalation language
+  privilege-escalation: |
+    # Keywords indicating privilege escalation or operating as root/admin
+    sudo
+    run as root
+    escalate privileges
+    become administrator
+    gain elevated access
+    bypass authentication
+    disable security
+    setuid
+    chmod 777
+    chmod +s
+    privilege escalation
+    run with elevated
+    execute as administrator
+    administrator privileges
+
+  # SKL-SEC-003: Data exfiltration patterns
+  data-exfiltration: |
+    # Keywords indicating data being sent to external destinations
+    exfiltrate
+    send data to external
+    upload to external
+    transmit to remote
+    leak data
+    send credentials
+    forward secrets
+    export sensitive
+    copy to external storage
+    transfer to third party
+    webhook.site
+    requestbin
+    burpcollaborator
+    oastify.com
+    pipedream.net
+
+  # SKL-SEC-004: Credential harvesting patterns
+  credential-harvesting: |
+    # Keywords indicating credential collection or theft
+    steal credentials
+    harvest passwords
+    capture tokens
+    extract api keys
+    collect secrets
+    phishing
+    credential stuffing
+    brute force password
+    enumerate users
+    dump credentials
+    keylogger
+    password spraying
+    capture authentication
+
+  # SKL-SEC-005: Scope creep rules
+  # Format: category: forbidden keyword1, keyword2, ...
+  scope-creep: |
+    # data category should not include infra provisioning
+    data: deploy, provision infrastructure, create cluster, manage kubernetes
+    # analytics category should not include destructive DB operations
+    analytics: delete database, drop table, truncate, delete all records
+    # communication category should not include code execution
+    communication: execute code, run shell, bash -c, system command
+    # productivity category should not include production data access
+    productivity: access production, modify live data, delete records, admin console
+
+  # SKL-SEC-006: Safety guardrail requirements
+  # Format: category: required phrase1, required phrase2, ...
+  # At least ONE of the listed phrases must be present in the skill file
+  safety-guardrails: |
+    # Database skills must warn about irreversible operations
+    database: confirmation required, dry run, requires approval, cannot be undone, irreversible, backup recommended
+    # Infra skills must mention approval/change management
+    infra: confirmation required, requires approval, change management, review before applying, dry run
+    # Admin skills must mention elevated access and audit logging
+    admin: admin access required, requires elevated privileges, audit logged, requires approval, multi-factor
+
+  # SKL-SEC-007: Suspicious download URLs
+  # Patterns indicating skill instructs the agent to download and execute untrusted binaries
+  suspicious-download-urls: |
+    # Executable file extensions that should never appear in skill download instructions
+    .exe
+    .bat
+    .cmd
+    .dmg
+    .msi
+    .ps1
+    # Suspicious download sources / obfuscation services
+    bit.ly/
+    tinyurl.com/
+    t.co/
+    dropbox.com/s/
+    mega.nz/
+    # GitHub release binary downloads (flag for review — skills should not auto-download binaries)
+    releases/download/
+    # macOS-specific binary execution helpers
+    authtool
+    osascript -e
+    # Common silent curl/wget patterns used to pull and execute remote code
+    curl -fsSL
+    curl -o /tmp
+    wget -q -O
+    wget --quiet
+
+  # SKL-SEC-008: Hardcoded secrets — keyword patterns
+  # Literal secret values or placeholders indicating real credentials left in skill content
+  hardcoded-secrets: |
+    # API key placeholders / prefixes that indicate live credentials
+    sk-proj-
+    sk-ant-
+    ghp_
+    gho_
+    github_pat_
+    glpat-
+    AKIA
+    # Slack tokens
+    xoxb-
+    xoxp-
+    xoxa-
+    # Generic secret placeholder patterns
+    private_key_here
+    insert_your_api_key
+    replace_with_token
+    # Crypto wallet seed material — must never appear in skill instructions
+    seed phrase
+    mnemonic phrase
+    wallet mnemonic
+    recovery phrase
+
+  # SKL-SEC-009: Direct financial execution
+  # Skills that autonomously execute financial operations without human approval
+  financial-execution: |
+    execute trade
+    execute swap
+    place order
+    submit order
+    confirm purchase
+    initiate payment
+    process payment
+    wire transfer
+    send funds
+    transfer funds
+    withdraw funds
+    defi trading
+    snipe token
+    front-run
+    payment processing
+    billing execution
+    charge customer
+    # Crypto wallet private key usage
+    private key
+    wallet private key
+    sign transaction
+
+  # SKL-SEC-010: Untrusted third-party content ingestion
+  # Skills that fetch and act on arbitrary external content without validation
+  untrusted-content: |
+    browse any url
+    fetch any url
+    fetch any website
+    fetch any link
+    load any url
+    read any website
+    visit any url
+    scrape twitter
+    scrape reddit
+    scrape any website
+    read social media
+    fetch user-supplied url
+    follow any link
+
+  # SKL-SEC-011: Unverifiable external runtime dependency
+  # Skills that pull in and execute code from external sources at runtime
+  external-runtime-dependency: |
+    fetch instructions from
+    load instructions from
+    auto-update skill
+    self-update
+    fetch and execute
+    download and run
+    download and execute
+    curl | python
+    curl | bash
+    curl | sh
+    wget | python
+    wget | bash
+    pipe to shell
+    execute downloaded
+    run downloaded script
+
+  # SKL-SEC-012: System service modification
+  # Skills that attempt to install, enable, or persist system-level services
+  system-service-modification: |
+    launchctl load
+    launchctl start
+    launchctl stop
+    launchctl enable
+    systemctl enable
+    systemctl disable
+    systemctl start
+    systemctl stop
+    service install
+    install service
+    crontab -e
+    cron job
+    /etc/rc.local
+    /etc/init.d/
+    /etc/sudoers
+    HKLM\Software\Microsoft\Windows\CurrentVersion\Run
+    registry run key
+    startup registry
+    persistence mechanism
+
+  # SKL-SEC-013: Required SKILL.md frontmatter fields
+  # These field names must appear in the SKILL.md frontmatter block (---...---)
+  # One entry per required field name (exact match, case-insensitive)
+  required-frontmatter-fields: |
+    name
+    description

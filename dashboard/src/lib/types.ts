@@ -315,3 +315,43 @@ export interface VerifiedInventory {
   totalRejected: number;
   totalPending: number;
 }
+
+// ---------- Skill Catalog Governance Types ----------
+
+export interface SkillCatalogFinding {
+  checkID: string;
+  severity: 'Critical' | 'High' | 'Medium' | 'Low';
+  category: string;
+  title: string;
+  remediation: string;
+  filePath?: string;
+  line?: number;
+  matchedPattern?: string;
+}
+
+export interface SkillCatalogScore {
+  name: string;
+  namespace: string;
+  version: string;
+  category: string;
+  repoURL?: string;
+  websiteUrl?: string;  // spec.websiteUrl — may contain exact URL to the skills folder
+  score: number;
+  status: 'pass' | 'warning' | 'fail';
+  findings: SkillCatalogFinding[];
+  scannedFiles: number;
+  securityScanned?: boolean;
+}
+
+export interface SkillCatalogsSummary {
+  total: number;
+  passCount: number;
+  warningCount: number;
+  failCount: number;
+  averageScore: number;
+}
+
+export interface SkillCatalogsResponse {
+  catalogs: SkillCatalogScore[];
+  summary: SkillCatalogsSummary;
+}

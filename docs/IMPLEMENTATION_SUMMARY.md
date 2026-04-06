@@ -1,256 +1,290 @@
-# Implementation Summary — Governance Controller Status Updates
+# Implementation Summary - Skills Catalog UI Fix & Repository Scanner
 
-## ✅ Feature Complete & Deployed
+## What Was Changed
 
-The governance controller now automatically updates MCPServerCatalog resources with governance scores in the `.status.publisher` field. This feature is fully implemented, tested, and deployed to the mcp-governance Kind cluster.
+### 1. ✅ Fixed Misleading "All Checks Passed" Message
 
-## What Was Implemented
+**Problem:**
+The Skills Catalog was displaying "All checks passed" even when repository security scanning was disabled, giving users false confidence about their skill security.
 
-### 1. **Status Patcher Module** ✅
-- **File:** `controller/pkg/inventory/patcher.go`
-- **Features:**
-  - Patches catalog resource status fields with governance scores
-  - Uses Kubernetes Merge Patch strategy for safe updates
-  - Supports concurrent patching (5 parallel operations)
-  - Includes error logging and retry semantics
-  - Timeout: 5 seconds per patch
+**Solution:**
+Added intelligent messaging that distinguishes between:
+- Metadata checks only (warning) ⚠️
+- Full security scanning (success) ✅
 
-**Key Functions:**
-```go
-NewStatusPatcher(client)                           // Create patcher
-PatchCatalogStatus(ctx, resource)                  // Patch single resource
-PatchMultipleCatalogs(ctx, resources)              // Batch patch with concurrency
+**Before:**
+```
+✓ All checks passed — this skill catalog is compliant with governance policies.
 ```
 
-### 2. **Inventory Watcher Enhancement** ✅
-- **File:** `controller/pkg/inventory/watcher.go`
-- **Changes:**
-  - Added `StatusPatcher` field to Watcher struct
-  - Added `PatchStatusOnUpdate` configuration option
-  - Updated `onAdd()` and `onUpdate()` handlers to patch status
-  - Graceful error handling with logging
-
-### 3. **Controller Integration** ✅
-- **File:** `controller/cmd/api/main.go`
-- **Changes:**
-  - Enabled status patching in inventory watcher initialization
-  - Set `PatchStatusOnUpdate: true` for automatic status updates
-
-### 4. **Docker Image Build** ✅
-- Successfully built ARM64-compatible Docker image
-- Size: ~10MB (lightweight)
-- Deployed to mcp-governance Kind cluster
-- Image: `localhost/governance-controller:latest`
-
-### 5. **RBAC Permissions** ✅
-- Updated ClusterRole with status patching permissions
-- Permissions added for:
-  - `mcpservercatalogs/status` → `get`, `patch`, `update`
-  - `agentcatalogs/status` → `get`, `patch`, `update`
-  - `skillcatalogs/status` → `get`, `patch`, `update`
-  - `modelcatalogs/status` → `get`, `patch`, `update`
-
-### 6. **Documentation** ✅
-- Updated `README.md` with governance controller status updates section
-- Created `docs/GOVERNANCE_STATUS_UPDATES.md` implementation guide
-- Created `scripts/verify-status-updates.sh` verification script
-
-## Live Test Results
-
-### Test Environment
-- Cluster: `mcp-governance` (Kind)
-- Namespace: `agentregistry`
-- Resources: 2 MCPServerCatalog entries
-- Controller: Running in `default` namespace
-
-### Verification Output
+**After (When scanning disabled):**
 ```
-✅ Found 2 MCPServerCatalog resources
-✅ Controller pod is Running
-✅ Found 6 successful status patches in recent logs
-✅ kagent-kagent-grafana-mcp — Score: 78, Grade: B
-✅ kagent-kagent-tool-server — Score: 86, Grade: B
-✅ No RBAC errors detected
-✅ All catalog resources have governance scores patched!
+✓ Metadata checks passed. ⚠️ Repository security scanning is disabled.
+
+Enable scanRepoContent: true in the Governance policy to scan for prompt injection, 
+privilege escalation, and other security patterns in the repository content.
 ```
 
-### Sample Status Field
-```json
-{
-  "grade": "B",
-  "gradedAt": "2026-02-20T04:51:45Z",
-  "score": 78,
-  "verifiedOrganization": true,
-  "verifiedPublisher": true
-}
-```
-
-## Code Changes Summary
-
-### Files Created
-1. `controller/pkg/inventory/patcher.go` (150 lines)
-   - Status patcher implementation
-   - Kubernetes patch logic
-   - Error handling
-
-2. `docs/GOVERNANCE_STATUS_UPDATES.md` (300+ lines)
-   - Implementation guide
-   - Architecture diagrams
-   - Testing procedures
-   - Troubleshooting guide
-
-3. `scripts/verify-status-updates.sh` (170+ lines)
-   - Automated verification script
-   - Status field validation
-   - RBAC error detection
-
-### Files Modified
-1. `controller/pkg/inventory/watcher.go`
-   - Added `StatusPatcher` field to `Watcher`
-   - Added `PatchStatusOnUpdate` configuration
-   - Updated event handlers with patching logic
-
-2. `controller/cmd/api/main.go`
-   - Enabled status patching in watcher initialization
-
-3. `README.md`
-   - Added "Governance Controller Status Updates" section
-   - Included status field example
-   - Added grade thresholds table
-   - Added RBAC requirements
-
-## How It Works
-
-```
-MCPServerCatalog Created/Updated
-        ↓
-Inventory Watcher detects event
-        ↓
-Score catalog (0–100)
-        ↓
-Status Patcher
-        ↓
-PATCH .status.publisher with:
-  - score (numeric 0–100)
-  - grade (letter A–F)
-  - verifiedPublisher (bool)
-  - verifiedOrganization (bool)
-  - gradedAt (timestamp)
-        ↓
-Agent Registry UI displays
-color-coded badge (A=green, B=blue, etc.)
-```
-
-## Grade Mapping
-
-| Grade | Score Range | Meaning |
-|-------|------------|---------|
-| **A** | 90–100 | ✅ Excellent |
-| **B** | 80–89 | ✅ Good |
-| **C** | 70–79 | ⚠️ Fair |
-| **D** | 60–69 | ⚠️ Poor |
-| **F** | 0–59 | ❌ Critical |
-
-## Testing Instructions
-
-### Quick Verification
-```bash
-# Run automated verification
-./scripts/verify-status-updates.sh
-
-# Manual check
-kubectl get mcpservercatalog -n agentregistry -o jsonpath='{.items[*].status.publisher}' | jq .
-
-# Watch for updates in real-time
-kubectl logs -n default deployment/mcp-governance-controller -f | grep patcher
-```
-
-### End-to-End Test
-1. Create or update an MCPServerCatalog resource
-2. Check logs for "Successfully patched" message
-3. Verify `.status.publisher` field is populated
-4. Confirm grade badge displays in Agent Registry UI
-
-## Performance Metrics
-
-- **Scoring Time:** < 100ms per catalog
-- **Patching Time:** < 500ms per catalog
-- **Concurrency:** 5 parallel patches
-- **API Throughput:** ~10 catalogs/second
-- **Memory Overhead:** < 50MB
-- **CPU Overhead:** < 5% during active patching
-
-## Deployment Status
-
-✅ **Production Ready**
-
-The feature is:
-- ✅ Fully implemented
-- ✅ Thoroughly tested
-- ✅ RBAC secured
-- ✅ Error handling complete
-- ✅ Documented
-- ✅ Deployed to mcp-governance cluster
-- ✅ Actively patching resources
-
-## Next Steps (Optional Enhancements)
-
-1. **Webhook Validation** — Validate score range (0–100) via CRD webhooks
-2. **Event Recording** — Record Kubernetes events on status changes
-3. **Historical Tracking** — Store score history in annotations
-4. **Metrics Export** — Expose scores as Prometheus metrics
-5. **Multi-Catalog Support** — Extend to AgentCatalog, SkillCatalog, ModelCatalog
-
-## Files Summary
-
-### Source Code
-```
-controller/
-├── pkg/inventory/
-│   ├── patcher.go              ← NEW: Status patcher module (150 lines)
-│   ├── watcher.go              ← MODIFIED: Added patching logic
-│   ├── scorer.go
-│   ├── types.go
-│   └── ...
-├── cmd/api/
-│   └── main.go                 ← MODIFIED: Enabled status patching
-└── ...
-
-docs/
-└── GOVERNANCE_STATUS_UPDATES.md ← NEW: Implementation guide (300+ lines)
-
-scripts/
-└── verify-status-updates.sh     ← NEW: Verification script (170+ lines)
-
-README.md                         ← MODIFIED: Added feature documentation
-```
-
-### Testing & Verification
-- Docker image: `localhost/governance-controller:latest` (55.7MB)
-- Image tag: SHA256:444b665358f80454f3bca919b006d18ec94ff3c5181da57e0aac437c98449d0e
-- Tested resources: 2 MCPServerCatalog (both patched ✅)
-- Status patch count: 6+ confirmed in logs
-
-## Logs Sample
-
-```
-[inventory] MCPServerCatalog ADDED: agentregistry/kagent-kagent-grafana-mcp — Verified Score: 78 (Verified) Grade: B
-[patcher] Successfully patched agentregistry/kagent-kagent-grafana-mcp status: score=78, grade=B, verifiedPublisher=true, verifiedOrg=true
-[inventory] MCPServerCatalog ADDED: agentregistry/kagent-kagent-tool-server — Verified Score: 86 (Verified) Grade: B
-[patcher] Successfully patched agentregistry/kagent-kagent-tool-server status: score=86, grade=B, verifiedPublisher=true, verifiedOrg=true
-```
-
-## References
-
-- GitHub Source: https://github.com/den-vasyliev/agentregistry-inventory/blob/enterprise-controller/docs/governance-controller.md
-- Implementation Guide: `docs/GOVERNANCE_STATUS_UPDATES.md`
-- Verification Script: `scripts/verify-status-updates.sh`
-- Controller Source: `controller/pkg/inventory/patcher.go`
+**Implementation:**
+- Updated `SkillCatalogScore` type to include `securityScanned` flag
+- Modified `SkillCatalog.tsx` to show conditional messages
+- Backend already sends `securityScanned` flag, frontend now uses it
 
 ---
 
-## ✨ Summary
+### 2. 🚀 Added Repository Scanner Feature
 
-The governance controller status update feature is **fully implemented, tested, and deployed**. All MCPServerCatalog resources are now automatically scored and their status fields updated with governance metrics. The Agent Registry UI can now display color-coded governance badges (A–F) on catalog cards, enabling users to see trust verification and security posture at a glance.
+**What It Does:**
+Scan GitHub, GitLab, or Bitbucket repositories for security patterns directly from the dashboard with credential management for private repos.
 
-**Status: ✅ READY FOR PRODUCTION**
+**Features:**
+
+#### Scan Repository Tab
+- 🔗 Enter repository URL
+- 🔐 Toggle for private repositories
+- 🔑 Select credential for private repos
+- 🔍 One-click scanning
+- 📊 View detailed results with:
+  - Files scanned count
+  - Issues found count
+  - Detailed findings with severity levels
+  - Security check status (pass/fail)
+
+#### Credentials Tab
+- ➕ Add credentials (GitHub, GitLab, Bitbucket)
+- 📋 View all saved credentials
+- 🔒 Tokens masked for security (xxxx...xxxx)
+- 📌 Copy token to clipboard
+- 🗑️ Delete credentials
+- 💾 Stored securely in browser localStorage
+
+---
+
+## Technical Changes
+
+### Modified Files
+
+1. **`dashboard/src/lib/types.ts`**
+   ```typescript
+   export interface SkillCatalogScore {
+     // ... existing fields ...
+     securityScanned?: boolean;  // NEW
+   }
+   ```
+
+2. **`dashboard/src/components/SkillCatalog.tsx`**
+   - Updated no-findings message logic
+   - Added conditional rendering based on `securityScanned` flag
+   - Shows helpful remediation text when scanning is disabled
+
+3. **`dashboard/src/app/page.tsx`**
+   - Imported `RepoScanner` component
+   - Added `'repo-scanner'` to activeTab state type
+   - Added repo-scanner tab to navigation with Scan icon
+   - Added repo-scanner tab content rendering
+
+### New Files
+
+1. **`dashboard/src/components/RepoScanner.tsx`**
+   - 600+ lines of React component
+   - Tabs: Scan Repository | Credentials
+   - Full credential lifecycle management
+   - Scan request/response handling
+   - localStorage integration
+   - Beautiful UI with proper error handling
+
+2. **`dashboard/src/app/api/governance/scan/repo/route.ts`**
+   - Next.js API route for repository scanning
+   - Validates repository URLs
+   - Pattern matching for security issues
+   - Mock implementation (production backend integration ready)
+   - Error handling and validation
+
+### Documentation
+
+1. **`REPO_SCANNER_IMPLEMENTATION.md`**
+   - Comprehensive feature documentation
+   - Architecture diagrams
+   - User workflows
+   - Security considerations
+   - Testing recommendations
+   - Future enhancement ideas
+
+---
+
+## Key Features
+
+### 🔒 Security
+- Credentials stored **locally in browser only**
+- Tokens **never sent to backend** except during scan
+- Token **masking** on display (4 chars visible)
+- **HTTPS** for credential transmission
+- No credential persistence on server
+
+### 🎯 Supported Repositories
+- ✅ GitHub (github.com)
+- ✅ GitLab (gitlab.com)
+- ✅ Bitbucket (bitbucket.org)
+
+### 🔍 Security Patterns Detected
+- 🚨 Prompt Injection (HIGH)
+- 🚨 Privilege Escalation (HIGH)
+- 🚨 Credential Harvesting (CRITICAL)
+- ⚠️ Data Exfiltration (HIGH)
+- ⚠️ Scope Creep (HIGH)
+- 📋 Safety Guardrails (MEDIUM)
+
+### 📊 Results Display
+- Files scanned counter
+- Issues found counter
+- Detailed findings with severity badges
+- Security check status (pass/fail)
+- Error messages and remediation tips
+
+---
+
+## User Interface Changes
+
+### Dashboard Navigation Bar
+
+**Before:**
+```
+Overview | MCP Servers | Verified Catalog | Skills Catalog | Resources | Findings | About
+```
+
+**After:**
+```
+Overview | MCP Servers | Verified Catalog | Skills Catalog | Repo Scanner | Resources | Findings | About
+```
+
+### Skills Catalog - No Findings Display
+
+**Before:**
+```
+✓ All checks passed — this skill catalog is compliant with governance policies.
+```
+
+**After (Example with security scanning disabled):**
+```
+✓ Metadata checks passed. ⚠️ Repository security scanning is disabled.
+
+Enable scanRepoContent: true in the Governance policy to scan for prompt injection, 
+privilege escalation, and other security patterns in the repository content.
+```
+
+---
+
+## How to Use
+
+### Fix the Misleading Message
+Just deploy the updated dashboard code. The UI will now correctly indicate when security scanning is disabled.
+
+### Use Repository Scanner
+
+**For Public Repositories:**
+1. Click "Repo Scanner" tab
+2. Enter repository URL
+3. Click "Scan Repository"
+4. View results
+
+**For Private Repositories:**
+1. Click "Repo Scanner" tab
+2. Go to "Credentials" tab
+3. Click "Add New Credential"
+4. Enter name and PAT (Personal Access Token)
+5. Save credential
+6. Go back to "Scan" tab
+7. Enter repository URL
+8. Check "Private Repository"
+9. Select your credential
+10. Click "Scan Repository"
+11. View results
+
+---
+
+## Backend Integration (Ready for Implementation)
+
+The frontend is ready for full backend integration. When backend is ready:
+
+1. Implement `/api/governance/scan/repo` endpoint in controller
+2. Accept credentials for private repo cloning
+3. Perform actual file scanning instead of mock results
+4. Return real findings and security check results
+
+Current mock response format matches the expected interface perfectly:
+```typescript
+{
+  status: 'success',
+  repoUrl: 'https://github.com/owner/repo',
+  filesScanned: 42,
+  issuesFound: 2,
+  findings: [
+    {
+      title: 'Potential prompt injection pattern',
+      severity: 'High',
+      description: 'Found patterns...',
+      pattern: 'ignore previous instructions'
+    }
+  ],
+  securityChecks: [
+    { id: 'SKL-SEC-001', name: '...', passed: false, description: '...' }
+  ]
+}
+```
+
+---
+
+## Backward Compatibility
+
+✅ **No breaking changes**
+- Existing SkillCatalog data works fine
+- `securityScanned` flag is optional (defaults to undefined)
+- Message logic handles all cases gracefully
+- New tab doesn't affect other functionality
+
+---
+
+## Files to Deploy
+
+```
+dashboard/src/
+  ├── lib/
+  │   └── types.ts                        (MODIFIED)
+  ├── components/
+  │   ├── SkillCatalog.tsx                (MODIFIED)
+  │   └── RepoScanner.tsx                 (NEW)
+  └── app/
+      ├── page.tsx                        (MODIFIED)
+      └── api/governance/scan/
+          └── repo/route.ts               (NEW)
+```
+
+---
+
+## Testing Checklist
+
+- [ ] Skills Catalog shows warning message when `securityScanned` = false
+- [ ] Skills Catalog shows success message when `securityScanned` = true
+- [ ] Repository Scanner tab appears in navigation
+- [ ] Can add credentials in Credentials tab
+- [ ] Credentials are masked and stored
+- [ ] Can delete credentials
+- [ ] Can copy credentials to clipboard
+- [ ] Can scan public repository without credentials
+- [ ] Can scan private repository with credentials
+- [ ] Scan results display properly
+- [ ] localStorage persists credentials across page reload
+- [ ] Error handling works correctly
+- [ ] All TypeScript types compile without errors
+
+---
+
+## Support & Questions
+
+Refer to `REPO_SCANNER_IMPLEMENTATION.md` for:
+- Detailed architecture
+- Future enhancement ideas
+- Security considerations
+- Testing recommendations
+- API specification for backend integration
+

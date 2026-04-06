@@ -184,6 +184,43 @@ spec:
                       description: "Per-check maximum score overrides. Keys are check IDs (PUB-001, PUB-002, PUB-003, SEC-001, SEC-002, DEP-001, DEP-002, DEP-003, TOOL-001, USE-001)."
                       additionalProperties:
                         type: integer
+                skillGovernance:
+                  type: object
+                  description: "Skill Governance configuration for SkillCatalog CRs. All fields optional — omitted values use built-in defaults."
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: true
+                      description: "Enable skill governance checks (SKL-001 through SKL-SEC-006)"
+                    scanRepoContent:
+                      type: boolean
+                      default: false
+                      description: "Fetch and pattern-scan GitHub repository content referenced in SkillCatalog.spec.repository.url"
+                    githubToken:
+                      type: string
+                      description: "Personal access token for private GitHub repositories (optional)"
+                    scanCacheTTLMinutes:
+                      type: integer
+                      default: 60
+                      description: "Cache duration for scan results in minutes"
+                    failOnPromptInjection:
+                      type: boolean
+                      default: true
+                      description: "Mark skill score as failing when SKL-SEC-001 prompt injection pattern is detected"
+                    failOnPrivilegeEscalation:
+                      type: boolean
+                      default: true
+                      description: "Mark skill score as failing when SKL-SEC-002 privilege escalation pattern is detected"
+                    allowedExternalDomains:
+                      type: array
+                      description: "List of external domains permitted for data transfers."
+                      items:
+                        type: string
+                    requireSafetyGuardrails:
+                      type: array
+                      description: "Skill categories that MUST contain safety guardrail phrases (SKL-SEC-006)."
+                      items:
+                        type: string
             status:
               type: object
               properties:
@@ -345,6 +382,10 @@ spec:
                       type: integer
                     rateLimitScore:
                       type: integer
+                    toolScopeScore:
+                      type: integer
+                    hardenedDeploymentScore:
+                      type: integer
                 namespaceScores:
                   type: array
                   items:
@@ -362,6 +403,165 @@ spec:
                 findingsCount:
                   type: integer
                   description: "Total number of findings detected"
+                mcpServerScores:
+                  type: array
+                  description: "Per-MCP-server governance scores"
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      source:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["compliant", "warning", "failing", "critical"]
+                      score:
+                        type: integer
+                      toolCount:
+                        type: integer
+                      effectiveToolCount:
+                        type: integer
+                      criticalFindings:
+                        type: integer
+                      lastEvaluated:
+                        type: string
+                        format: date-time
+                      scoreBreakdown:
+                        type: object
+                        properties:
+                          gatewayRouting:
+                            type: integer
+                          authentication:
+                            type: integer
+                          authorization:
+                            type: integer
+                          tls:
+                            type: integer
+                          cors:
+                            type: integer
+                          rateLimit:
+                            type: integer
+                          promptGuard:
+                            type: integer
+                          toolScope:
+                            type: integer
+                          hardenedDeployment:
+                            type: integer
+                      relatedResources:
+                        type: object
+                        properties:
+                          gateways:
+                            type: integer
+                          backends:
+                            type: integer
+                          policies:
+                            type: integer
+                          routes:
+                            type: integer
+                verifiedCatalogScores:
+                  type: array
+                  description: "Per-catalog governance scores from Agent Registry"
+                  items:
+                    type: object
+                    properties:
+                      catalogName:
+                        type: string
+                      namespace:
+                        type: string
+                      resourceVersion:
+                        type: string
+                      status:
+                        type: string
+                      compositeScore:
+                        type: integer
+                      securityScore:
+                        type: integer
+                      trustScore:
+                        type: integer
+                      complianceScore:
+                        type: integer
+                      lastScored:
+                        type: string
+                        format: date-time
+                      checks:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            name:
+                              type: string
+                            points:
+                              type: integer
+                            maxPoints:
+                              type: integer
+                skillCatalogScores:
+                  type: array
+                  description: "Per-skill-catalog governance scores from Agent Registry"
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        description: "SkillCatalog CR name"
+                      namespace:
+                        type: string
+                        description: "SkillCatalog CR namespace"
+                      version:
+                        type: string
+                        description: "Version from SkillCatalog.spec.version"
+                      category:
+                        type: string
+                        description: "Category from SkillCatalog.spec.category"
+                      repoURL:
+                        type: string
+                        description: "Repository URL"
+                      websiteUrl:
+                        type: string
+                        description: "URL to the skills folder (used for on-demand browser scanning)"
+                      score:
+                        type: integer
+                        minimum: 0
+                        maximum: 100
+                        description: "Governance score (0-100)"
+                      status:
+                        type: string
+                        enum: ["pass", "warning", "fail"]
+                        description: "Status based on score thresholds"
+                      scannedFiles:
+                        type: integer
+                        description: "Number of files scanned from repository"
+                      securityScanned:
+                        type: boolean
+                        description: "Whether security content scanning was performed"
+                      findings:
+                        type: array
+                        description: "Governance findings for this skill"
+                        items:
+                          type: object
+                          properties:
+                            checkID:
+                              type: string
+                              description: "Check ID (e.g., SKL-001, SKL-SEC-001)"
+                            severity:
+                              type: string
+                              enum: ["Critical", "High", "Medium", "Low"]
+                            category:
+                              type: string
+                            title:
+                              type: string
+                            remediation:
+                              type: string
+                            filePath:
+                              type: string
+                            line:
+                              type: integer
+                            matchedPattern:
+                              type: string
       subresources:
         status: {}
       additionalPrinterColumns:

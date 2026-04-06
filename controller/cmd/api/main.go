@@ -15,6 +15,7 @@ import (
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/discovery"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/evaluator"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/inventory"
+	"github.com/techwithhuz/mcp-security-governance/controller/pkg/skillscanner"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/watcher"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -202,6 +203,9 @@ func main() {
 	mux.HandleFunc("/api/governance/inventory/verified", handleInventoryVerified)
 	mux.HandleFunc("/api/governance/inventory/summary", handleInventorySummary)
 	mux.HandleFunc("/api/governance/inventory/detail", handleInventoryDetail)
+	// Skill Catalog governance endpoints
+	mux.HandleFunc("/api/governance/skill-catalogs", handleSkillCatalogs)
+	mux.HandleFunc("/api/governance/skill-catalogs/scan", handleSkillCatalogScan)
 
 	// CORS middleware
 	handler := corsMiddleware(mux)
@@ -1473,4 +1477,145 @@ func handleInventoryDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, res)
+}
+
+// handleSkillCatalogs returns all SkillCatalog governance scores from the latest evaluation.
+func handleSkillCatalogs(w http.ResponseWriter, r *http.Request) {
+	snap := getSnapshot()
+	if snap.result == nil {
+		jsonResponse(w, map[string]interface{}{
+			"catalogs": []interface{}{},
+			"summary": map[string]interface{}{
+				"total":        0,
+				"passCount":    0,
+				"warningCount": 0,
+				"failCount":    0,
+				"averageScore": 0,
+			},
+		})
+		return
+	}
+
+	catalogs := snap.result.SkillCatalogScores
+	if catalogs == nil {
+		catalogs = []evaluator.SkillCatalogScore{}
+	}
+
+	// Compute summary
+	total := len(catalogs)
+	passCount, warningCount, failCount, scoreSum := 0, 0, 0, 0
+	for _, c := range catalogs {
+		switch c.Status {
+		case "pass":
+			passCount++
+		case "warning":
+			warningCount++
+		case "fail":
+			failCount++
+		}
+		scoreSum += c.Score
+	}
+	avgScore := 0
+	if total > 0 {
+		avgScore = scoreSum / total
+	}
+
+	jsonResponse(w, map[string]interface{}{
+		"catalogs": catalogs,
+		"summary": map[string]interface{}{
+			"total":        total,
+			"passCount":    passCount,
+			"warningCount": warningCount,
+			"failCount":    failCount,
+			"averageScore": avgScore,
+		},
+	})
+}
+
+// handleSkillCatalogScan runs an on-demand security scan for a specific SkillCatalog.
+// POST /api/governance/skill-catalogs/scan
+// Body: { "skillName": "...", "namespace": "...", "repoURL": "...", "token": "..." }
+//
+// This allows the dashboard to trigger a targeted repo content scan with an optional
+// GitHub token for private repositories, without changing the cluster-wide policy.
+func handleSkillCatalogScan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		SkillName string `json:"skillName"`
+		Namespace string `json:"namespace"`
+		RepoURL   string `json:"repoURL"`
+		Token     string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SkillName == "" {
+		http.Error(w, `{"error":"skillName is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Find the matching SkillCatalog resource from current state
+	stateMu.RLock()
+	cs := currentState
+	p := policy
+	stateMu.RUnlock()
+
+	if cs == nil {
+		http.Error(w, `{"error":"no cluster state available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	ns := req.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
+	var skill *evaluator.SkillCatalogResource
+	for i := range cs.SkillCatalogs {
+		if cs.SkillCatalogs[i].Name == req.SkillName && cs.SkillCatalogs[i].Namespace == ns {
+			skill = &cs.SkillCatalogs[i]
+			break
+		}
+	}
+	if skill == nil {
+		http.Error(w, fmt.Sprintf(`{"error":"SkillCatalog %q not found in namespace %q"}`, req.SkillName, ns), http.StatusNotFound)
+		return
+	}
+
+	// Override repoURL if provided
+	scanSkill := *skill
+	if req.RepoURL != "" {
+		scanSkill.RepoURL = req.RepoURL
+		scanSkill.RepoSource = "github"
+	}
+
+	// Build a one-shot policy with scanRepoContent=true and the supplied token
+	scanPolicy := p
+	scanPolicy.SkillGovernance.ScanRepoContent = true
+	if req.Token != "" {
+		scanPolicy.SkillGovernance.GitHubToken = req.Token
+	}
+
+	// Load patterns
+	patternLoader := skillscanner.NewPatternLoader(p.SkillGovernance.PatternMountPath)
+	ps := patternLoader.Get()
+
+	// Run metadata checks
+	ref := fmt.Sprintf("SkillCatalog/%s/%s", scanSkill.Namespace, scanSkill.Name)
+	metaFindings := evaluator.CheckSkillMetadataExported(scanSkill, ref)
+
+	// Run security scan
+	contentFindings, scannedFiles := evaluator.ScanSkillRepoExported(scanSkill, scanPolicy, ps)
+
+	// Build score
+	score := evaluator.ScoreSkillCatalogExported(scanSkill, metaFindings, contentFindings, scanPolicy)
+	score.ScannedFiles = scannedFiles
+	score.SecurityScanned = true
+
+	jsonResponse(w, map[string]interface{}{
+		"skill":        score,
+		"scannedFiles": scannedFiles,
+		"status":       "completed",
+	})
 }

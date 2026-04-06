@@ -38,10 +38,11 @@ rules:
       - mcpservers
       - remotemcpservers
     verbs: ["get", "list", "watch"]
-  # Agent Registry inventory CRDs (MCPServerCatalog for Verified Score)
+  # Agent Registry inventory CRDs (MCPServerCatalog for Verified Score + SkillCatalog for Skill Governance)
   - apiGroups: ["agentregistry.dev"]
     resources:
       - mcpservercatalogs
+      - skillcatalogs
     verbs: ["get", "list", "watch"]
   # Governance CRDs
   - apiGroups: ["governance.mcp.io"]
@@ -159,6 +160,15 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+          volumeMounts:
+            - name: skill-patterns
+              mountPath: /etc/mcp-governance/skill-patterns
+              readOnly: true
+      volumes:
+        - name: skill-patterns
+          configMap:
+            name: mcp-governance-skill-patterns
+            optional: true
 ---
 # Controller Service
 apiVersion: v1
@@ -226,6 +236,15 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+          volumeMounts:
+            - name: skill-patterns
+              mountPath: /etc/mcp-governance/skill-patterns
+              readOnly: true
+      volumes:
+        - name: skill-patterns
+          configMap:
+            name: mcp-governance-skill-patterns
+            optional: true
 ---
 # Dashboard Service (NodePort for Kind access)
 apiVersion: v1

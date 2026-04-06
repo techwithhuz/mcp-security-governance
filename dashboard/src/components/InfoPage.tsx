@@ -7,7 +7,8 @@ import {
   Eye, GitBranch, CheckCircle2, AlertTriangle, ArrowRight,
   Cpu, Layers, Search, FileKey, Blocks, ShieldCheck, ShieldAlert,
   Star, Activity, ChevronDown, ChevronUp, ExternalLink, Info,
-  BarChart3, RefreshCw, Scan, ArrowDown, Wrench, Github, Download, Settings
+  BarChart3, RefreshCw, Scan, ArrowDown, Wrench, Github, Download, Settings,
+  BookOpen, FileSearch, Tag, FolderOpen, GitBranch as BranchIcon, Terminal
 } from 'lucide-react';
 
 const SCORING_CONTROLS = [
@@ -1356,6 +1357,327 @@ status:
         </div>
 
         {/* Configuration Deep Dive removed */}
+      </section>
+
+      {/* ── Skills Catalog Governance ── */}
+      <section>
+        <SectionHeader
+          icon={BookOpen}
+          color="#a855f7"
+          title="Skills Catalog Governance"
+          subtitle="Automated metadata & security scoring for SkillCatalog Kubernetes resources (agentregistry.dev/v1alpha1)"
+        />
+
+        {/* What is a SkillCatalog */}
+        <div className="mt-6 bg-gov-surface rounded-2xl border border-gov-border p-6">
+          <h3 className="text-base font-bold text-gov-text mb-3">What is a SkillCatalog?</h3>
+          <p className="text-sm text-gov-text-2 leading-relaxed mb-4">
+            A <code className="bg-gov-bg px-1.5 py-0.5 rounded text-purple-400 text-xs">SkillCatalog</code> is a Kubernetes Custom Resource (CRD) from the <strong>Agent Registry</strong> project
+            (<code className="bg-gov-bg px-1.5 py-0.5 rounded text-blue-400 text-xs">agentregistry.dev/v1alpha1</code>). It declares a collection of AI skills — structured
+            manifests (typically <code className="bg-gov-bg px-1.5 py-0.5 rounded text-blue-400 text-xs">SKILL.md</code> files) — living in a GitHub repository folder.
+            Each catalog references a specific repo path where skill definitions are stored.
+          </p>
+          <div className="bg-gov-bg rounded-xl border border-gov-border p-4 mb-4">
+            <pre className="text-xs text-gov-text-2 font-mono overflow-x-auto">{`apiVersion: agentregistry.dev/v1alpha1
+kind: SkillCatalog
+metadata:
+  name: agent-skills-v1
+  namespace: default
+spec:
+  version: "1.0.0"
+  category: "automation"
+  description: "Production-ready skills for CI/CD automation agents"
+  repository:
+    source: github
+    url: https://github.com/myorg/agent-skills
+  websiteUrl: https://github.com/myorg/agent-skills/tree/main/skills`}</pre>
+          </div>
+          <p className="text-xs text-gov-text-3">
+            The <code className="text-purple-400">websiteUrl</code> field tells MCP-G (and the on-demand scanner) exactly which folder contains the skill files.
+            Without it, the entire repository is scanned.
+          </p>
+        </div>
+
+        {/* Metadata + Security Checks */}
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-gov-surface rounded-2xl border border-gov-border p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 rounded-xl bg-purple-500/15 border border-purple-500/20">
+                <Tag size={18} className="text-purple-400" />
+              </div>
+              <h3 className="text-sm font-bold text-gov-text">Metadata Checks (SKL-001–SKL-008)</h3>
+            </div>
+            <p className="text-xs text-gov-text-3 mb-3">Evaluated server-side by the controller on every reconciliation cycle:</p>
+            <div className="space-y-1.5">
+              {[
+                { id: 'SKL-001', title: 'Version Specified', sev: 'Medium', desc: 'spec.version is set' },
+                { id: 'SKL-002', title: 'Repository Source Known', sev: 'Low', desc: 'spec.repository.source is github/gitlab/bitbucket' },
+                { id: 'SKL-003', title: 'HTTPS Repository URL', sev: 'High', desc: 'spec.repository.url uses HTTPS' },
+                { id: 'SKL-004', title: 'Resource UID Label', sev: 'Low', desc: 'agentregistry.dev/resource-uid label present' },
+                { id: 'SKL-005', title: 'Category Specified', sev: 'Low', desc: 'spec.category is set' },
+                { id: 'SKL-006', title: 'Description Provided', sev: 'Low', desc: 'spec.description ≥ 20 characters' },
+                { id: 'SKL-007', title: 'Production Versioning', sev: 'Medium', desc: 'Production skills have version pin' },
+                { id: 'SKL-008', title: 'Organization Repository', sev: 'Medium', desc: 'Not a personal GitHub account' },
+              ].map(({ id, title, sev, desc }) => {
+                const sevColor = sev === 'High' ? '#f97316' : sev === 'Medium' ? '#eab308' : '#3b82f6';
+                return (
+                  <div key={id} className="flex items-start gap-2 p-2 rounded-lg bg-gov-bg border border-gov-border/50">
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 shrink-0">{id}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-gov-text leading-tight">{title}</p>
+                      <p className="text-[10px] text-gov-text-3">{desc}</p>
+                    </div>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ color: sevColor, backgroundColor: `${sevColor}15` }}>{sev}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bg-gov-surface rounded-2xl border border-gov-border p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 rounded-xl bg-red-500/15 border border-red-500/20">
+                <ShieldAlert size={18} className="text-red-400" />
+              </div>
+              <h3 className="text-sm font-bold text-gov-text">Security Checks (SKL-SEC-001–SKL-SEC-013)</h3>
+            </div>
+            <p className="text-xs text-gov-text-3 mb-3">Run by the browser-based On-Demand Scanner against repository content:</p>
+            <div className="space-y-1.5">
+              {[
+                { id: 'SKL-SEC-001', title: 'Prompt Injection Patterns', sev: 'Critical', desc: 'No jailbreak / ignore-previous-instructions strings' },
+                { id: 'SKL-SEC-002', title: 'Privilege Escalation', sev: 'Critical', desc: 'No sudo / chmod 777 / setenforce 0 patterns' },
+                { id: 'SKL-SEC-003', title: 'Data Exfiltration URLs', sev: 'High', desc: 'No curl/wget to external hosts in skill content' },
+                { id: 'SKL-SEC-004', title: 'Hardcoded Secrets', sev: 'High', desc: 'No API keys, passwords, or tokens in plaintext' },
+                { id: 'SKL-SEC-005', title: 'Dangerous Commands', sev: 'High', desc: 'No rm -rf / drop table / format disk commands' },
+                { id: 'SKL-SEC-006', title: 'Safety Guardrails', sev: 'Medium', desc: 'Database/infra skills contain safety guardrail phrases' },
+                { id: 'SKL-SEC-007', title: 'SSRF Patterns', sev: 'Critical', desc: 'No internal network access (169.254.x, 10.x)' },
+                { id: 'SKL-SEC-008', title: 'Code Injection', sev: 'High', desc: 'No eval() / exec() / shell_exec() in skill content' },
+                { id: 'SKL-SEC-009', title: 'Path Traversal', sev: 'Medium', desc: 'No ../ directory traversal patterns' },
+                { id: 'SKL-SEC-010', title: 'Insecure Protocols', sev: 'Medium', desc: 'No plaintext HTTP endpoints' },
+                { id: 'SKL-SEC-011', title: 'XXE Injection', sev: 'High', desc: 'No XML External Entity patterns' },
+                { id: 'SKL-SEC-012', title: 'Template Injection', sev: 'Medium', desc: 'No SSTI patterns ({{ 7*7 }}, <%=, ${T()})' },
+                { id: 'SKL-SEC-013', title: 'Unvalidated Redirects', sev: 'Medium', desc: 'No open redirect patterns in URLs' },
+              ].map(({ id, title, sev, desc }) => {
+                const sevColor = sev === 'Critical' ? '#ef4444' : sev === 'High' ? '#f97316' : sev === 'Medium' ? '#eab308' : '#3b82f6';
+                return (
+                  <div key={id} className="flex items-start gap-2 p-2 rounded-lg bg-gov-bg border border-gov-border/50">
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 shrink-0 whitespace-nowrap">{id}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-gov-text leading-tight">{title}</p>
+                      <p className="text-[10px] text-gov-text-3">{desc}</p>
+                    </div>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap" style={{ color: sevColor, backgroundColor: `${sevColor}15` }}>{sev}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Scoring formula */}
+        <div className="mt-6 bg-gov-surface rounded-2xl border border-gov-border p-6">
+          <h3 className="text-base font-bold text-gov-text mb-4">Skill Scoring Formula</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <p className="text-sm text-gov-text-3 mb-3">Score starts at <strong className="text-gov-text">100</strong> and deductions are applied per finding:</p>
+              <div className="space-y-2">
+                {[
+                  { sev: 'Critical', penalty: -40, color: '#ef4444' },
+                  { sev: 'High', penalty: -25, color: '#f97316' },
+                  { sev: 'Medium', penalty: -15, color: '#eab308' },
+                  { sev: 'Low', penalty: -5, color: '#3b82f6' },
+                ].map(({ sev, penalty, color }) => (
+                  <div key={sev} className="flex items-center justify-between p-2.5 rounded-lg border" style={{ borderColor: `${color}25`, backgroundColor: `${color}08` }}>
+                    <span className="text-sm font-semibold" style={{ color }}>{sev}</span>
+                    <span className="text-sm font-black tabular-nums" style={{ color }}>{penalty} pts</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-sm text-gov-text-3 mb-3">Status thresholds:</p>
+              <div className="space-y-2">
+                {[
+                  { status: 'Pass', range: '≥ 80', color: '#22c55e', desc: 'Metadata complete + no critical security issues' },
+                  { status: 'Warning', range: '50 – 79', color: '#eab308', desc: 'Some issues present, not critical' },
+                  { status: 'Fail', range: '< 50', color: '#ef4444', desc: 'Critical / multiple High findings detected' },
+                ].map(({ status, range, color, desc }) => (
+                  <div key={status} className="p-3 rounded-xl border" style={{ borderColor: `${color}25`, backgroundColor: `${color}08` }}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-bold" style={{ color }}>{status}</span>
+                      <span className="text-xs font-mono font-bold" style={{ color }}>{range}</span>
+                    </div>
+                    <p className="text-[11px] text-gov-text-3">{desc}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 p-3 rounded-xl bg-gov-bg border border-gov-border">
+                <p className="text-xs text-gov-text-3">
+                  <strong className="text-gov-text">Floor at 0:</strong> Multiple Critical findings cannot drive the score below zero.
+                  1 Critical + 1 High = −65 → score 35 (Fail).
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Skills On-Demand Scanner ── */}
+      <section>
+        <SectionHeader
+          icon={Scan}
+          color="#06b6d4"
+          title="Skills On-Demand Scanner"
+          subtitle="Browser-native security scanner — scans GitHub repositories directly from your browser, no cluster access required"
+        />
+
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          {[
+            {
+              step: '01',
+              icon: BookOpen,
+              color: '#a855f7',
+              title: 'Auto-detected from SkillCatalog',
+              desc: 'The scanner reads the repoURL and websiteUrl from each SkillCatalog CR. When a catalog becomes active it auto-scans the linked GitHub folder automatically.',
+            },
+            {
+              step: '02',
+              icon: FolderOpen,
+              color: '#06b6d4',
+              title: 'Per-Folder Parallel Scanning',
+              desc: 'The scanner traverses the repo tree and scans each subfolder independently. Results are broken down per folder — see exactly which folder contains which security issue.',
+            },
+            {
+              step: '03',
+              icon: ShieldAlert,
+              color: '#ef4444',
+              title: '13 Security Checks Applied',
+              desc: 'Each SKILL.md and skill file is pattern-matched against 13 security checks (SKL-SEC-001–SKL-SEC-013). Results are aggregated and the effective score is recomputed.',
+            },
+          ].map(({ step, icon: Icon, color, title, desc }) => (
+            <div key={step} className="bg-gov-surface rounded-2xl border border-gov-border p-5">
+              <div className="flex items-start gap-3 mb-3">
+                <div className="p-2 rounded-xl flex-shrink-0" style={{ backgroundColor: `${color}15` }}>
+                  <Icon size={16} style={{ color }} />
+                </div>
+                <span className="text-2xl font-black opacity-20 mt-1">{step}</span>
+              </div>
+              <h3 className="text-sm font-bold text-gov-text mb-2">{title}</h3>
+              <p className="text-xs text-gov-text-3 leading-relaxed">{desc}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-gov-surface rounded-2xl border border-gov-border p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 rounded-xl bg-cyan-500/15 border border-cyan-500/20">
+                <Terminal size={18} className="text-cyan-400" />
+              </div>
+              <h3 className="text-base font-bold text-gov-text">Standalone Scanner Tab</h3>
+            </div>
+            <p className="text-sm text-gov-text-3 mb-4">
+              The <strong className="text-gov-text">Skills On-Demand Scanner</strong> tab lets you scan any public GitHub repository — even without a SkillCatalog CR deployed:
+            </p>
+            <div className="space-y-2">
+              {[
+                { label: 'Repository URL', desc: 'Any public GitHub repo (e.g., https://github.com/myorg/skills)' },
+                { label: 'Folder Path (optional)', desc: 'Limit scanning to a specific subfolder (e.g., skills/automation)' },
+                { label: 'Private Token (optional)', desc: 'GitHub PAT stored locally in the browser — never sent to any server' },
+              ].map(({ label, desc }) => (
+                <div key={label} className="flex items-start gap-2 p-3 bg-gov-bg rounded-lg border border-gov-border/50">
+                  <ArrowRight size={14} className="text-cyan-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold text-gov-text">{label}</p>
+                    <p className="text-[10px] text-gov-text-3 mt-0.5">{desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-gov-surface rounded-2xl border border-gov-border p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 rounded-xl bg-blue-500/15 border border-blue-500/20">
+                <FileSearch size={18} className="text-blue-400" />
+              </div>
+              <h3 className="text-base font-bold text-gov-text">Session Persistence</h3>
+            </div>
+            <p className="text-sm text-gov-text-3 mb-4">
+              Scan results are cached in the browser&apos;s <code className="bg-gov-bg px-1.5 py-0.5 rounded text-blue-400 text-xs">sessionStorage</code>.
+              This means:
+            </p>
+            <div className="space-y-2">
+              {[
+                { icon: CheckCircle2, color: '#22c55e', text: 'Results survive tab switching and navigation' },
+                { icon: CheckCircle2, color: '#22c55e', text: 'Page refresh reloads cached results — no re-scan needed' },
+                { icon: CheckCircle2, color: '#22c55e', text: 'Overview page shows live-scan scores, not controller metadata scores' },
+                { icon: CheckCircle2, color: '#22c55e', text: 'Summary counts (Pass/Warn/Fail) auto-recomputed from live results' },
+                { icon: AlertTriangle, color: '#eab308', text: 'Results are cleared when the browser tab is closed' },
+              ].map(({ icon: Icon, color, text }, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs text-gov-text-2">
+                  <Icon size={13} style={{ color }} className="mt-0.5 shrink-0" />
+                  {text}
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+              <p className="text-xs text-amber-300">
+                <strong>Security note:</strong> GitHub tokens are stored in <code className="text-amber-400">localStorage</code> per-hostname
+                (opt-in). They are never transmitted to the MCP-G controller — all API calls go directly from your browser to GitHub.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 bg-gov-surface rounded-2xl border border-gov-border p-6">
+          <h3 className="text-base font-bold text-gov-text mb-4">Technical Details — Scan API</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <p className="text-xs font-semibold text-gov-text-3 uppercase tracking-wider mb-3">Scan API Endpoint (local Next.js route)</p>
+              <div className="bg-gov-bg rounded-lg border border-gov-border p-4 mb-3">
+                <pre className="text-xs text-gov-text-2 font-mono whitespace-pre-wrap">{`POST /api/scan/repo
+Content-Type: application/json
+
+{
+  "repoUrl": "https://github.com/org/repo",
+  "folderPath": "skills",        // optional
+  "catalogName": "my-catalog",
+  "namespace": "default",
+  "credentialToken": "ghp_..."  // optional
+}`}</pre>
+              </div>
+              <p className="text-[11px] text-gov-text-3">
+                This route is <strong>NOT proxied</strong> to the governance controller.
+                The Next.js middleware skips <code className="text-blue-400">/api/scan/*</code> — it calls the GitHub API directly server-side.
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-gov-text-3 uppercase tracking-wider mb-3">Response Shape</p>
+              <div className="bg-gov-bg rounded-lg border border-gov-border p-4">
+                <pre className="text-xs text-gov-text-2 font-mono whitespace-pre-wrap">{`{
+  "status": "success",
+  "scanPath": "skills",
+  "folderResults": [{
+    "folderPath": "skills/automation",
+    "filesScanned": 3,
+    "score": 0,
+    "status": "fail",
+    "securityChecks": [...],
+    "findings": [{
+      "checkID": "SKL-SEC-002",
+      "severity": "Critical",
+      "title": "Privilege Escalation",
+      "filePath": "SKILL.md",
+      "line": 14,
+      "matchedPattern": "sudo chmod 777"
+    }]
+  }]
+}`}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* ── Tier 2 OWASP Security Controls ── */}

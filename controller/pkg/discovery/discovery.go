@@ -97,11 +97,14 @@ func (d *K8sDiscoverer) DiscoverClusterState(ctx context.Context) *evaluator.Clu
 	// Discover NetworkPolicies for network segmentation checks
 	state.NetworkPolicies = d.discoverNetworkPolicies(ctx)
 
-	log.Printf("[discovery] Found: %d gateways, %d backends, %d policies, %d routes, %d agents, %d mcpservers, %d remote-mcpservers, %d services, %d namespaces, %d workloads, %d networkpolicies",
+	// Discover SkillCatalog CRs (agentregistry.dev/v1alpha1)
+	state.SkillCatalogs = d.discoverSkillCatalogs(ctx)
+
+	log.Printf("[discovery] Found: %d gateways, %d backends, %d policies, %d routes, %d agents, %d mcpservers, %d remote-mcpservers, %d services, %d namespaces, %d workloads, %d networkpolicies, %d skillcatalogs",
 		len(state.Gateways), len(state.AgentgatewayBackends), len(state.AgentgatewayPolicies),
 		len(state.HTTPRoutes), len(state.KagentAgents), len(state.KagentMCPServers),
 		len(state.KagentRemoteMCPServers), len(state.Services), len(state.Namespaces),
-		len(state.Workloads), len(state.NetworkPolicies))
+		len(state.Workloads), len(state.NetworkPolicies), len(state.SkillCatalogs))
 
 	return state
 }
@@ -1234,6 +1237,57 @@ func (d *K8sDiscoverer) DiscoverGovernancePolicy(ctx context.Context) *evaluator
 		policy.VerifiedCatalogScoring = vcs
 	}
 
+	// Parse skillGovernance configuration
+	if sgMap, ok := spec["skillGovernance"].(map[string]interface{}); ok {
+		sg := evaluator.SkillGovernancePolicy{
+			PatternMountPath: "/etc/mcp-governance/skill-patterns",
+		}
+		if val, ok := sgMap["enabled"].(bool); ok {
+			sg.Enabled = val
+		}
+		if val, ok := sgMap["scanRepoContent"].(bool); ok {
+			sg.ScanRepoContent = val
+		}
+		if val, ok := sgMap["githubToken"].(string); ok {
+			sg.GitHubToken = val
+		}
+		if val, ok := sgMap["scanCacheTTLMinutes"].(int64); ok {
+			sg.ScanCacheTTLMinutes = int(val)
+		}
+		if val, ok := sgMap["failOnPromptInjection"].(bool); ok {
+			sg.FailOnPromptInjection = val
+		}
+		if val, ok := sgMap["failOnPrivilegeEscalation"].(bool); ok {
+			sg.FailOnPrivilegeEscalation = val
+		}
+		if domainList, ok := sgMap["allowedExternalDomains"].([]interface{}); ok {
+			for _, d := range domainList {
+				if s, ok := d.(string); ok {
+					sg.AllowedExternalDomains = append(sg.AllowedExternalDomains, s)
+				}
+			}
+		}
+		if cats, ok := sgMap["requireSafetyGuardrails"].([]interface{}); ok {
+			for _, c := range cats {
+				if s, ok := c.(string); ok {
+					sg.RequireSafetyGuardrails = append(sg.RequireSafetyGuardrails, s)
+				}
+			}
+		}
+		policy.SkillGovernance = sg
+	} else {
+		// Default: enable skill governance with metadata checks only (no repo scanning)
+		policy.SkillGovernance = evaluator.SkillGovernancePolicy{
+			Enabled:                   true,
+			ScanRepoContent:           false,
+			FailOnPromptInjection:     true,
+			FailOnPrivilegeEscalation: true,
+			ScanCacheTTLMinutes:       60,
+			RequireSafetyGuardrails:   []string{"database", "infra", "admin"},
+			PatternMountPath:          "/etc/mcp-governance/skill-patterns",
+		}
+	}
+
 	log.Printf("[discovery] Loaded MCPGovernancePolicy: %s/%s (targetNS=%v, excludeNS=%v)",
 		policyObj.GetNamespace(), policyObj.GetName(), policy.TargetNamespaces, policy.ExcludeNamespaces)
 	return policy
@@ -1462,18 +1516,46 @@ func (d *K8sDiscoverer) UpdateEvaluationStatus(ctx context.Context, policyName s
 			}
 		}
 
+		// Build skillCatalogScores
+		skillCatalogScores := make([]interface{}, 0)
+		for _, scs := range result.SkillCatalogScores {
+			sfindings := make([]interface{}, 0)
+			for _, sf := range scs.Findings {
+				sfindings = append(sfindings, map[string]interface{}{
+					"checkID":     sf.CheckID,
+					"severity":    sf.Severity,
+					"category":    sf.Category,
+					"title":       sf.Title,
+					"remediation": sf.Remediation,
+				})
+			}
+			skillCatalogScores = append(skillCatalogScores, map[string]interface{}{
+				"name":         scs.Name,
+				"namespace":    scs.Namespace,
+				"version":      scs.Version,
+				"category":     scs.Category,
+				"repoURL":      scs.RepoURL,
+				"websiteUrl":   scs.WebsiteURL,
+				"score":        int64(scs.Score),
+				"status":       scs.Status,
+				"scannedFiles": int64(scs.ScannedFiles),
+				"findings":     sfindings,
+			})
+		}
+
 		// Set the status
 		status := map[string]interface{}{
-			"score":              int64(result.Score),
-			"phase":              phase,
-			"findings":           findings,
-			"resourceSummary":    resourceSummary,
-			"scoreBreakdown":     scoreBreakdown,
-			"namespaceScores":    nsScores,
+			"score":               int64(result.Score),
+			"phase":               phase,
+			"findings":            findings,
+			"resourceSummary":     resourceSummary,
+			"scoreBreakdown":      scoreBreakdown,
+			"namespaceScores":     nsScores,
 			"verifiedCatalogScores": verifiedCatalogScores,
-			"mcpServerScores":    mcpServerScores,
-			"lastEvaluationTime": now,
-			"findingsCount":      int64(len(result.Findings)),
+			"mcpServerScores":     mcpServerScores,
+			"skillCatalogScores":  skillCatalogScores,
+			"lastEvaluationTime":  now,
+			"findingsCount":       int64(len(result.Findings)),
 		}
 
 		if err := unstructured.SetNestedField(evalObj.Object, status, "status"); err != nil {
@@ -1577,4 +1659,67 @@ func extractToolNamesFromCEL(expr string) []string {
 		}
 	}
 	return tools
+}
+
+// discoverSkillCatalogs discovers SkillCatalog CRs from agentregistry.dev/v1alpha1.
+func (d *K8sDiscoverer) discoverSkillCatalogs(ctx context.Context) []evaluator.SkillCatalogResource {
+	gvr := schema.GroupVersionResource{
+		Group:    "agentregistry.dev",
+		Version:  "v1alpha1",
+		Resource: "skillcatalogs",
+	}
+
+	list, err := d.dynamicClient.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Printf("[discovery] SkillCatalog CRD not available: %v", err)
+		return nil
+	}
+
+	var catalogs []evaluator.SkillCatalogResource
+	for _, item := range list.Items {
+		sc := evaluator.SkillCatalogResource{
+			Name:      item.GetName(),
+			Namespace: item.GetNamespace(),
+			Labels:    item.GetLabels(),
+		}
+
+		// Extract well-known labels from agentregistry.dev
+		labels := item.GetLabels()
+		if v, ok := labels["agentregistry.dev/resource-environment"]; ok {
+			sc.Environment = v
+		}
+		if v, ok := labels["agentregistry.dev/resource-uid"]; ok {
+			sc.ResourceUID = v
+		}
+		if v, ok := labels["agentregistry.dev/resource-version"]; ok && sc.Version == "" {
+			sc.Version = v
+		}
+
+		spec, _ := getNestedMap(item.Object, "spec")
+		if spec != nil {
+			sc.Category, _ = getNestedString(spec, "category")
+			sc.Description, _ = getNestedString(spec, "description")
+			sc.Title, _ = getNestedString(spec, "title")
+			sc.Name = item.GetName() // keep the CR name
+
+			// Prefer spec.version over the label version
+			if ver, _ := getNestedString(spec, "version"); ver != "" {
+				sc.Version = ver
+			}
+
+			// spec.repository.source and spec.repository.url
+			repoMap, _ := getNestedMap(spec, "repository")
+			if repoMap != nil {
+				sc.RepoSource, _ = getNestedString(repoMap, "source")
+				sc.RepoURL, _ = getNestedString(repoMap, "url")
+			}
+
+			// spec.websiteUrl — may point directly to the skills folder (e.g. a GitHub tree URL)
+			sc.WebsiteURL, _ = getNestedString(spec, "websiteUrl")
+		}
+
+		catalogs = append(catalogs, sc)
+	}
+
+	return catalogs
 }

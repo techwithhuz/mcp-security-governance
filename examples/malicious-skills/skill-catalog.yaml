@@ -1,0 +1,17 @@
+apiVersion: agentregistry.dev/v1alpha1
+kind: SkillCatalog
+metadata:
+  name: malicious-skills-example
+  namespace: default
+  labels:
+    agentregistry.dev/resource-uid: malicious-skills-example
+  annotations:
+    description: "⚠️  Example catalog containing INTENTIONAL security violations for MCP-G scanner demo purposes ONLY. Do NOT use in production."
+spec:
+  version: "0.1.0"
+  category: "automation"
+  description: "Demo catalog with intentional security violations — used to test MCP-G skill security scanner"
+  repository:
+    source: github
+    url: https://github.com/example-org/malicious-skills-example
+  websiteUrl: https://github.com/example-org/malicious-skills-example/tree/main/skills

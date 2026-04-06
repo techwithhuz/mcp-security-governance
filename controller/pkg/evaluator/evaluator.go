@@ -6,6 +6,7 @@ import (
 
 	v1alpha1 "github.com/techwithhuz/mcp-security-governance/controller/pkg/apis/governance/v1alpha1"
 	"github.com/techwithhuz/mcp-security-governance/controller/pkg/auditor"
+	"github.com/techwithhuz/mcp-security-governance/controller/pkg/skillscanner"
 )
 
 // Severity levels for governance findings
@@ -43,11 +44,30 @@ type ClusterState struct {
 	KagentMCPServers       []KagentMCPServerResource
 	KagentRemoteMCPServers []KagentRemoteMCPServerResource
 
+	// agentregistry resources (agentregistry.dev/v1alpha1)
+	SkillCatalogs []SkillCatalogResource
+
 	// Standard K8s
 	Services        []ServiceResource
 	Namespaces      []string
 	Workloads       []WorkloadResource
 	NetworkPolicies []NetworkPolicyResource
+}
+
+// SkillCatalogResource holds the governance-relevant fields from a SkillCatalog CR.
+type SkillCatalogResource struct {
+	Name        string
+	Namespace   string
+	Version     string
+	Category    string // spec.category (e.g. "data", "analytics", "infra", "admin")
+	Description string
+	Title       string
+	RepoSource  string // spec.repository.source (e.g. "github")
+	RepoURL     string // spec.repository.url
+	WebsiteURL  string // spec.websiteUrl — may contain the exact path to the skills folder
+	Environment string // label agentregistry.dev/resource-environment
+	ResourceUID string // label agentregistry.dev/resource-uid
+	Labels      map[string]string
 }
 
 // FilterByNamespaces returns a new ClusterState containing only resources whose
@@ -133,6 +153,11 @@ func (s *ClusterState) FilterByNamespaces(targetNamespaces, excludeNamespaces []
 	for _, r := range s.NetworkPolicies {
 		if allowed[r.Namespace] {
 			filtered.NetworkPolicies = append(filtered.NetworkPolicies, r)
+		}
+	}
+	for _, r := range s.SkillCatalogs {
+		if allowed[r.Namespace] {
+			filtered.SkillCatalogs = append(filtered.SkillCatalogs, r)
 		}
 	}
 
@@ -312,9 +337,37 @@ type EvaluationResult struct {
 	NamespaceScores []NamespaceScore
 	Timestamp       time.Time
 	// MCP-server-centric views
-	MCPServerViews       []MCPServerView             `json:"mcpServerViews"`
-	MCPServerSummary     MCPServerSummary            `json:"mcpServerSummary"`
+	MCPServerViews        []MCPServerView                `json:"mcpServerViews"`
+	MCPServerSummary      MCPServerSummary               `json:"mcpServerSummary"`
 	VerifiedCatalogScores []v1alpha1.VerifiedCatalogScore `json:"verifiedCatalogScores,omitempty"`
+	SkillCatalogScores    []SkillCatalogScore            `json:"skillCatalogScores,omitempty"`
+}
+
+// SkillCatalogScore is the per-catalog governance score written to the status CR.
+type SkillCatalogScore struct {
+	Name             string                `json:"name"`
+	Namespace        string                `json:"namespace"`
+	Version          string                `json:"version"`
+	Category         string                `json:"category"`
+	RepoURL          string                `json:"repoURL,omitempty"`
+	WebsiteURL       string                `json:"websiteUrl,omitempty"` // spec.websiteUrl — exact path to skills folder
+	Score            int                   `json:"score"`
+	Status           string                `json:"status"` // "pass", "warning", "fail"
+	Findings         []SkillCatalogFinding `json:"findings,omitempty"`
+	ScannedFiles     int                   `json:"scannedFiles"`
+	SecurityScanned  bool                  `json:"securityScanned"` // true only when repo content was actually scanned
+}
+
+// SkillCatalogFinding is a serialisable governance finding for a SkillCatalog.
+type SkillCatalogFinding struct {
+	CheckID        string `json:"checkID"`
+	Severity       string `json:"severity"`
+	Category       string `json:"category"`
+	Title          string `json:"title"`
+	Remediation    string `json:"remediation"`
+	FilePath       string `json:"filePath,omitempty"`
+	Line           int    `json:"line,omitempty"`
+	MatchedPattern string `json:"matchedPattern,omitempty"`
 }
 
 type ScoreBreakdown struct {
@@ -385,6 +438,43 @@ type Policy struct {
 	Weights             ScoringWeights
 	SeverityPenalties   SeverityPenalties
 	VerifiedCatalogScoring interface{} // *v1alpha1.VerifiedCatalogScoringConfig (stored as interface to avoid circular imports)
+	SkillGovernance        SkillGovernancePolicy
+}
+
+// SkillGovernancePolicy configures governance behaviour for SkillCatalog CRs.
+type SkillGovernancePolicy struct {
+	// Enabled activates skill governance checks (SKL-001 through SKL-SEC-006).
+	Enabled bool
+
+	// ScanRepoContent, when true, fetches and pattern-scans the GitHub repository
+	// referenced in SkillCatalog.spec.repository.url via the GitHub Contents API.
+	ScanRepoContent bool
+
+	// GitHubToken is an optional personal access token for private repositories.
+	GitHubToken string
+
+	// ScanCacheTTLMinutes is how long scan results are cached (default: 60).
+	ScanCacheTTLMinutes int
+
+	// FailOnPromptInjection marks the overall skill score as failing when
+	// SKL-SEC-001 is detected.
+	FailOnPromptInjection bool
+
+	// FailOnPrivilegeEscalation marks the overall skill score as failing when
+	// SKL-SEC-002 is detected.
+	FailOnPrivilegeEscalation bool
+
+	// AllowedExternalDomains is a list of permitted external domains.
+	// SKL-SEC-003 is suppressed for URLs matching these domains.
+	AllowedExternalDomains []string
+
+	// RequireSafetyGuardrails lists categories that MUST contain safety guardrail
+	// phrases (SKL-SEC-006). Defaults to ["database", "infra", "admin"].
+	RequireSafetyGuardrails []string
+
+	// PatternMountPath is the filesystem path where the skill-patterns ConfigMap
+	// is mounted (default: /etc/mcp-governance/skill-patterns).
+	PatternMountPath string
 }
 
 // SeverityPenalties defines how many points are deducted per finding severity
@@ -443,6 +533,15 @@ func DefaultPolicy() Policy {
 			HardenedDeployment:      15,
 		},
 		SeverityPenalties: DefaultSeverityPenalties(),
+		SkillGovernance: SkillGovernancePolicy{
+			Enabled:                   true,
+			ScanRepoContent:           false,
+			ScanCacheTTLMinutes:       60,
+			FailOnPromptInjection:     true,
+			FailOnPrivilegeEscalation: true,
+			RequireSafetyGuardrails:   []string{"database", "infra", "admin"},
+			PatternMountPath:          "/etc/mcp-governance/skill-patterns",
+		},
 	}
 }
 
@@ -483,6 +582,16 @@ func Evaluate(state *ClusterState, policy Policy) *EvaluationResult {
 	result.Findings = append(result.Findings, checkExposure(state, policy)...)
 	result.Findings = append(result.Findings, checkToolCount(state, policy)...)
 	result.Findings = append(result.Findings, checkHardenedDeployment(state, policy)...)
+
+	// Skill Catalogue governance — metadata + optional repo scanning
+	mountPath := policy.SkillGovernance.PatternMountPath
+	if mountPath == "" {
+		mountPath = "/etc/mcp-governance/skill-patterns"
+	}
+	pl := skillscanner.NewPatternLoader(mountPath)
+	skillFindings, skillScores := checkSkillCatalogs(state, policy, pl)
+	result.Findings = append(result.Findings, skillFindings...)
+	result.SkillCatalogScores = skillScores
 
 	// Tier 2 #16: Audit every finding
 	for _, f := range result.Findings {
