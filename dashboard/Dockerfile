@@ -14,9 +14,11 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Create a non-root user/group (UID/GID 1001) to run the Next.js server
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -u 1001 -S nextjs -G nodejs
+# Install git (needed for sparse-checkout repo scanning) and create non-root user
+RUN apk add --no-cache git && \
+    addgroup -g 1001 -S nodejs && \
+    adduser -u 1001 -S nextjs -G nodejs && \
+    git config --system safe.directory '*'
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

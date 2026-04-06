@@ -33,16 +33,19 @@ func checkSkillCatalogs(state *ClusterState, policy Policy, patternLoader *skill
 		// --- Repo content scanning (SKL-SEC-001 to SKL-SEC-006) ---
 		var contentFindings []Finding
 		scannedFiles := 0
+		securityScanned := false
 
 		if policy.SkillGovernance.ScanRepoContent && skill.RepoSource == "github" && skill.RepoURL != "" {
 			ps := patternLoader.Get()
 			contentFindings, scannedFiles = scanSkillRepo(skill, policy, ps)
 			findings = append(findings, contentFindings...)
+			securityScanned = true
 		}
 
 		// --- Build per-catalog score ---
 		score := scoreSkillCatalog(skill, metaFindings, contentFindings, policy)
 		score.ScannedFiles = scannedFiles
+		score.SecurityScanned = securityScanned
 		scores = append(scores, score)
 	}
 
@@ -281,14 +284,15 @@ func scoreSkillCatalog(skill SkillCatalogResource, metaFindings, contentFindings
 	}
 
 	return SkillCatalogScore{
-		Name:      skill.Name,
-		Namespace: skill.Namespace,
-		Version:   skill.Version,
-		Category:  skill.Category,
-		RepoURL:   skill.RepoURL,
-		Score:     score,
-		Status:    status,
-		Findings:  sFindings,
+		Name:       skill.Name,
+		Namespace:  skill.Namespace,
+		Version:    skill.Version,
+		Category:   skill.Category,
+		RepoURL:    skill.RepoURL,
+		WebsiteURL: skill.WebsiteURL,
+		Score:      score,
+		Status:     status,
+		Findings:   sFindings,
 	}
 }
 
@@ -330,4 +334,21 @@ func sanitiseID(s string) string {
 	s = strings.ReplaceAll(s, "/", "-")
 	s = strings.ReplaceAll(s, ".", "-")
 	return s
+}
+
+// ── Exported wrappers for use by cmd/api/main.go ─────────────────────────────
+
+// CheckSkillMetadataExported is an exported wrapper for checkSkillMetadata.
+func CheckSkillMetadataExported(skill SkillCatalogResource, ref string) []Finding {
+	return checkSkillMetadata(skill, ref)
+}
+
+// ScanSkillRepoExported is an exported wrapper for scanSkillRepo.
+func ScanSkillRepoExported(skill SkillCatalogResource, policy Policy, ps *skillscanner.PatternSet) ([]Finding, int) {
+	return scanSkillRepo(skill, policy, ps)
+}
+
+// ScoreSkillCatalogExported is an exported wrapper for scoreSkillCatalog.
+func ScoreSkillCatalogExported(skill SkillCatalogResource, metaFindings, contentFindings []Finding, policy Policy) SkillCatalogScore {
+	return scoreSkillCatalog(skill, metaFindings, contentFindings, policy)
 }

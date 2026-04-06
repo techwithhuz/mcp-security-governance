@@ -100,6 +100,13 @@ func (pl *PatternLoader) load() {
 		"credential-harvesting",
 		"scope-creep",
 		"safety-guardrails",
+		"suspicious-download-urls",
+		"hardcoded-secrets",
+		"financial-execution",
+		"untrusted-content",
+		"external-runtime-dependency",
+		"system-service-modification",
+		"required-frontmatter-fields",
 	}
 
 	for _, key := range keys {
@@ -321,6 +328,144 @@ func ScanContent(filePath string, content string, ps *PatternSet, skillCategory 
 					strings.Join(rule.RequiredPhrases, ", "),
 				),
 			})
+		}
+	}
+
+	// SKL-SEC-007: Suspicious download URLs
+	for _, pat := range ps.SuspiciousDownloadURLs {
+		if idx := strings.Index(lower, strings.ToLower(pat)); idx >= 0 {
+			line := lineNumber(content, idx)
+			findings = append(findings, SkillFinding{
+				CheckID:        "SKL-SEC-007",
+				Severity:       "Critical",
+				Category:       "Suspicious Download URL",
+				FilePath:       filePath,
+				Line:           line,
+				MatchedPattern: pat,
+				Title:          fmt.Sprintf("Suspicious download pattern detected: %q", pat),
+				Remediation:    "Remove instructions that download or execute untrusted binaries. Skills must not auto-fetch and run executables.",
+			})
+		}
+	}
+
+	// SKL-SEC-008: Hardcoded secrets — keyword patterns
+	for _, pat := range ps.HardcodedSecrets {
+		if idx := strings.Index(lower, strings.ToLower(pat)); idx >= 0 {
+			line := lineNumber(content, idx)
+			findings = append(findings, SkillFinding{
+				CheckID:        "SKL-SEC-008",
+				Severity:       "High",
+				Category:       "Hardcoded Secrets",
+				FilePath:       filePath,
+				Line:           line,
+				MatchedPattern: pat,
+				Title:          fmt.Sprintf("Potential hardcoded secret detected: %q", pat),
+				Remediation:    "Remove hardcoded credentials or secret placeholders. Use environment variables or a secrets manager instead.",
+			})
+		}
+	}
+
+	// SKL-SEC-009: Direct financial execution
+	for _, pat := range ps.FinancialExecution {
+		if idx := strings.Index(lower, strings.ToLower(pat)); idx >= 0 {
+			line := lineNumber(content, idx)
+			findings = append(findings, SkillFinding{
+				CheckID:        "SKL-SEC-009",
+				Severity:       "Medium",
+				Category:       "Direct Financial Execution",
+				FilePath:       filePath,
+				Line:           line,
+				MatchedPattern: pat,
+				Title:          fmt.Sprintf("Direct financial execution pattern detected: %q", pat),
+				Remediation:    "Require explicit human approval before executing any financial operation. Do not allow autonomous fund transfers or trades.",
+			})
+		}
+	}
+
+	// SKL-SEC-010: Untrusted third-party content ingestion
+	for _, pat := range ps.UntrustedContent {
+		if idx := strings.Index(lower, strings.ToLower(pat)); idx >= 0 {
+			line := lineNumber(content, idx)
+			findings = append(findings, SkillFinding{
+				CheckID:        "SKL-SEC-010",
+				Severity:       "Medium",
+				Category:       "Untrusted Content Ingestion",
+				FilePath:       filePath,
+				Line:           line,
+				MatchedPattern: pat,
+				Title:          fmt.Sprintf("Untrusted content ingestion pattern detected: %q", pat),
+				Remediation:    "Restrict the skill to a known allow-list of domains. Do not fetch or act on arbitrary user-supplied URLs.",
+			})
+		}
+	}
+
+	// SKL-SEC-011: Unverifiable external runtime dependency
+	for _, pat := range ps.ExternalRuntimeDependency {
+		if idx := strings.Index(lower, strings.ToLower(pat)); idx >= 0 {
+			line := lineNumber(content, idx)
+			findings = append(findings, SkillFinding{
+				CheckID:        "SKL-SEC-011",
+				Severity:       "High",
+				Category:       "External Runtime Dependency",
+				FilePath:       filePath,
+				Line:           line,
+				MatchedPattern: pat,
+				Title:          fmt.Sprintf("Unverifiable external runtime dependency detected: %q", pat),
+				Remediation:    "Pin all dependencies to a specific verified version. Do not fetch and execute remote code at runtime.",
+			})
+		}
+	}
+
+	// SKL-SEC-012: System service modification
+	for _, pat := range ps.SystemServiceModification {
+		if idx := strings.Index(lower, strings.ToLower(pat)); idx >= 0 {
+			line := lineNumber(content, idx)
+			findings = append(findings, SkillFinding{
+				CheckID:        "SKL-SEC-012",
+				Severity:       "Medium",
+				Category:       "System Service Modification",
+				FilePath:       filePath,
+				Line:           line,
+				MatchedPattern: pat,
+				Title:          fmt.Sprintf("System service modification pattern detected: %q", pat),
+				Remediation:    "Skills must not install, enable, or persist system services. Remove any instructions that modify OS-level service configuration.",
+			})
+		}
+	}
+
+	// SKL-SEC-013: SKILL.md frontmatter validation
+	// Only runs on SKILL.md / skill.md files
+	if strings.EqualFold(filepath.Base(filePath), "skill.md") || strings.EqualFold(filepath.Base(filePath), "skills.md") {
+		if !strings.HasPrefix(strings.TrimSpace(content), "---") {
+			findings = append(findings, SkillFinding{
+				CheckID:  "SKL-SEC-013",
+				Severity: "Low",
+				Category: "Skill Metadata",
+				FilePath: filePath,
+				Title:    "SKILL.md is missing a YAML frontmatter block (---)",
+				Remediation: "Add a YAML frontmatter block at the top of SKILL.md with at least 'name:' and 'description:' fields.",
+			})
+		} else {
+			for _, field := range ps.RequiredFrontmatterFields {
+				needle := strings.ToLower(field) + ":"
+				// Search only within the frontmatter block (between first --- pair)
+				end := strings.Index(content[3:], "---")
+				frontmatter := content
+				if end > 0 {
+					frontmatter = content[3 : end+3]
+				}
+				if !strings.Contains(strings.ToLower(frontmatter), needle) {
+					findings = append(findings, SkillFinding{
+						CheckID:        "SKL-SEC-013",
+						Severity:       "Low",
+						Category:       "Skill Metadata",
+						FilePath:       filePath,
+						MatchedPattern: field,
+						Title:          fmt.Sprintf("SKILL.md frontmatter is missing required field: %q", field),
+						Remediation:    fmt.Sprintf("Add '%s:' to the YAML frontmatter block at the top of SKILL.md.", field),
+					})
+				}
+			}
 		}
 	}
 

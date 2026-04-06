@@ -16,6 +16,7 @@ import MCPServerDetail from '@/components/MCPServerDetail';
 import VerifiedCatalog from '@/components/VerifiedCatalog';
 import SkillCatalog from '@/components/SkillCatalog';
 import InfoPage from '@/components/InfoPage';
+import RepoScanner from '@/components/RepoScanner';
 import type { MCPServerView, MCPServerSummary, MCPServersResponse, VerifiedResource, VerifiedSummary, VerifiedCatalogResponse, VerifiedInventory, SkillCatalogsResponse } from '@/lib/types';
 
 interface DashboardData {
@@ -36,13 +37,24 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | 'skill-catalogs' | 'info'>('overview');
+  const [activeTab, setActiveTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | 'skill-catalogs' | 'repo-scanner' | 'info'>('overview');
   const [version, setVersion] = useState('');
   const [selectedMCPServer, setSelectedMCPServer] = useState<MCPServerView | null>(null);
-  const [previousTab, setPreviousTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | 'skill-catalogs' | 'info' | null>(null);
+  const [previousTab, setPreviousTab] = useState<'mcp-servers' | 'overview' | 'resources' | 'findings' | 'verified-catalog' | 'skill-catalogs' | 'repo-scanner' | 'info' | null>(null);
   const [lastScanTime, setLastScanTime] = useState<string>('');
   const [scanInterval, setScanInterval] = useState<string>('');
   const [scanning, setScanning] = useState(false);
+
+  // Read persisted scan results from sessionStorage (written by SkillCatalog component)
+  // so the Overview cards show the same effective score as the Skills Catalog tab.
+  const [cachedScanResults, setCachedScanResults] = useState<Record<string, { securityScanned: boolean; findings: Array<{ checkID: string; severity: string }> }>>({});
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('skillcatalog_scan_results');
+      if (raw) setCachedScanResults(JSON.parse(raw));
+    } catch { /* ignore */ }
+    // Re-read whenever the tab becomes 'overview' so results scanned in the Skills tab are reflected immediately
+  }, [activeTab]);
 
   // Use a ref for selectedMCPServer inside fetchData so it doesn't cause re-fetch cascades
   const selectedMCPServerRef = useRef<MCPServerView | null>(null);
@@ -100,7 +112,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000); // refresh UI data every 30s
+    const interval = setInterval(fetchData, 10000); // refresh UI data every 10s
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -208,6 +220,20 @@ export default function Dashboard() {
                 )}
               </div>
 
+              {/* About MCP-G button */}
+              <button
+                onClick={() => { setActiveTab('info'); setSelectedMCPServer(null); }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all text-xs font-medium ${
+                  activeTab === 'info'
+                    ? 'bg-gov-accent/15 text-blue-400 border-blue-500/30'
+                    : 'bg-gov-surface border-gov-border hover:border-gov-border-light hover:bg-gov-surface/80 text-gov-text-2'
+                }`}
+                title="About MCP Governance"
+              >
+                <Info className="w-3.5 h-3.5" />
+                About MCP-G
+              </button>
+
               {/* GitHub link */}
               <a
                 href="https://github.com/techwithhuz/mcp-security-governance"
@@ -228,10 +254,10 @@ export default function Dashboard() {
               { id: 'overview' as const, label: 'Overview', icon: Activity },
               { id: 'mcp-servers' as const, label: 'MCP Servers', icon: Plug },
               { id: 'verified-catalog' as const, label: 'Verified Catalog', icon: BadgeCheck },
-              { id: 'skill-catalogs' as const, label: 'Skill Catalogs', icon: BookOpen },
+              { id: 'skill-catalogs' as const, label: 'Skills Catalog', icon: BookOpen },
+              { id: 'repo-scanner' as const, label: 'Skills On-Demand Scanner', icon: Scan },
               { id: 'resources' as const, label: 'Resource Inventory', icon: Server },
               { id: 'findings' as const, label: 'All Findings', icon: AlertTriangle },
-              { id: 'info' as const, label: 'About MCP-G', icon: Info },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -331,13 +357,19 @@ export default function Dashboard() {
           return <VerifiedCatalog inventory={inventory} />;
         })()}
 
+        {/* ========== SKILL CATALOGS TAB ========== */}
+        {/* Keep always mounted (hidden when not active) so scan state survives tab switches */}
+        <div className={activeTab === 'skill-catalogs' ? undefined : 'hidden'}>
+          <SkillCatalog data={data.skillCatalogs} isActive={activeTab === 'skill-catalogs'} />
+        </div>
+
+        {/* ========== REPO SCANNER TAB ========== */}
+        {activeTab === 'repo-scanner' && (
+          <RepoScanner />
+        )}
+
         {/* ========== INFO TAB ========== */}
         {activeTab === 'info' && <InfoPage />}
-
-        {/* ========== SKILL CATALOGS TAB ========== */}
-        {activeTab === 'skill-catalogs' && (
-          <SkillCatalog data={data.skillCatalogs} />
-        )}
 
         {activeTab === 'overview' && (
           <>
@@ -600,6 +632,147 @@ export default function Dashboard() {
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Skills Catalog Quick View */}
+            {(data.skillCatalogs?.catalogs || []).length > 0 && (() => {
+              const skCatalogs = data.skillCatalogs.catalogs;
+              const skSummary = data.skillCatalogs.summary;
+
+              // Penalty formula matching the controller + SkillCatalog component
+              const penaltyMap: Record<string, number> = { Critical: 40, High: 25, Medium: 15, Low: 5 };
+
+              // Compute effective score for a single catalog using cached scan results
+              const getEffectiveScore = (c: { namespace: string; name: string; score: number; findings?: any[] }) => {
+                const key = `${c.namespace}/${c.name}`;
+                const cached = cachedScanResults[key];
+                if (!cached?.securityScanned) return c.score;
+                // Use ALL findings: metadata from controller + security from scan
+                const metaFindings = (c.findings || []).filter((f: any) => !f.checkID?.startsWith('SKL-SEC-'));
+                const scanFindings = cached.findings || [];
+                const allFindings = [...metaFindings, ...scanFindings];
+                const penalty = allFindings.reduce((sum: number, f: any) => sum + (penaltyMap[f.severity] ?? 5), 0);
+                return Math.max(0, 100 - penalty);
+              };
+
+              const getEffectiveStatus = (score: number) =>
+                score >= 80 ? 'pass' : score >= 50 ? 'warning' : 'fail';
+
+              const getScoreCol = (s: number) => s >= 80 ? '#22c55e' : s >= 50 ? '#eab308' : s >= 30 ? '#f97316' : '#ef4444';
+              const statusColors: Record<string, string> = { pass: '#22c55e', warning: '#eab308', fail: '#ef4444' };
+
+              // Recompute summary counts using effective scores
+              const effectiveCatalogs = skCatalogs.map((c: any) => {
+                const effScore = getEffectiveScore(c);
+                const effStatus = cachedScanResults[`${c.namespace}/${c.name}`]?.securityScanned
+                  ? getEffectiveStatus(effScore)
+                  : c.status;
+                return { ...c, effScore, effStatus };
+              });
+              const effPassCount = effectiveCatalogs.filter((c: any) => c.effStatus === 'pass').length;
+              const effWarnCount = effectiveCatalogs.filter((c: any) => c.effStatus === 'warning').length;
+              const effFailCount = effectiveCatalogs.filter((c: any) => c.effStatus === 'fail').length;
+              const effAvg = effectiveCatalogs.length
+                ? Math.round(effectiveCatalogs.reduce((s: number, c: any) => s + c.effScore, 0) / effectiveCatalogs.length)
+                : skSummary.averageScore;
+              const avgColor = getScoreCol(effAvg);
+              return (
+                <div className="bg-gov-surface rounded-2xl border border-gov-border p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <BookOpen size={18} className="text-purple-400" />
+                      <h2 className="text-lg font-bold">Skills Catalog</h2>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-purple-500/15 text-purple-400">
+                        {skSummary.total}
+                      </span>
+                      <span className="text-xs text-gov-text-3 ml-2">
+                        Avg Score: <span className="font-bold" style={{ color: avgColor }}>{effAvg}</span>
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab('skill-catalogs')}
+                      className="flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                      View All <ChevronRight size={14} />
+                    </button>
+                  </div>
+
+                  {/* Quick stats row */}
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div className="bg-gov-bg rounded-xl border border-green-500/15 p-3 text-center">
+                      <div className="text-2xl font-black text-green-400">{effPassCount}</div>
+                      <div className="text-[10px] text-gov-text-3 font-semibold uppercase">Pass</div>
+                    </div>
+                    <div className="bg-gov-bg rounded-xl border border-yellow-500/15 p-3 text-center">
+                      <div className="text-2xl font-black text-yellow-400">{effWarnCount}</div>
+                      <div className="text-[10px] text-gov-text-3 font-semibold uppercase">Warning</div>
+                    </div>
+                    <div className="bg-gov-bg rounded-xl border border-red-500/15 p-3 text-center">
+                      <div className="text-2xl font-black text-red-400">{effFailCount}</div>
+                      <div className="text-[10px] text-gov-text-3 font-semibold uppercase">Fail</div>
+                    </div>
+                  </div>
+
+                  {/* Catalog cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {[...effectiveCatalogs]
+                      .sort((a: any, b: any) => {
+                        const order: Record<string, number> = { fail: 0, warning: 1, pass: 2 };
+                        return (order[a.effStatus] ?? 3) - (order[b.effStatus] ?? 3);
+                      })
+                      .slice(0, 6)
+                      .map((c: any) => {
+                        const scoreColor = getScoreCol(c.effScore);
+                        const statusColor = statusColors[c.effStatus] ?? '#eab308';
+                        // For finding badges: use cached scan findings if available, else controller findings
+                        const cachedKey = `${c.namespace}/${c.name}`;
+                        const cachedFindings = cachedScanResults[cachedKey]?.findings || [];
+                        const allFindings = cachedFindings.length > 0 ? cachedFindings : (c.findings || []);
+                        const critCount = allFindings.filter((f: any) => f.severity === 'Critical').length;
+                        const highCount = allFindings.filter((f: any) => f.severity === 'High').length;
+                        return (
+                          <div
+                            key={`${c.namespace}/${c.name}`}
+                            className="bg-gov-bg rounded-xl border border-gov-border p-4 hover:border-gov-border-light transition-all cursor-pointer"
+                            onClick={() => setActiveTab('skill-catalogs')}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-sm font-semibold text-gov-text truncate max-w-[150px]">{c.name}</span>
+                              <div
+                                className="w-9 h-9 rounded-full flex items-center justify-center border-2 font-black text-sm tabular-nums shrink-0"
+                                style={{ borderColor: scoreColor, color: scoreColor, backgroundColor: `${scoreColor}10` }}
+                              >
+                                {c.effScore}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-gov-text-3 mb-2">
+                              {c.version && <span className="font-mono px-1.5 py-0.5 bg-gov-surface rounded">v{c.version}</span>}
+                              {c.category && <span className="px-1.5 py-0.5 bg-purple-500/10 text-purple-400 rounded-full">{c.category}</span>}
+                              <span className="font-mono">{c.namespace}</span>
+                            </div>
+                            <div className="flex gap-1.5 flex-wrap items-center">
+                              <span
+                                className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold capitalize"
+                                style={{ backgroundColor: `${statusColor}15`, color: statusColor }}
+                              >
+                                {c.effStatus}
+                              </span>
+                              {critCount > 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-semibold">{critCount} Critical</span>
+                              )}
+                              {highCount > 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-400 font-semibold">{highCount} High</span>
+                              )}
+                              {critCount === 0 && highCount === 0 && allFindings.length === 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 font-semibold">No issues</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                   </div>
                 </div>
               );

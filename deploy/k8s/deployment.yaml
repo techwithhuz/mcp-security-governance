@@ -236,6 +236,15 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+          volumeMounts:
+            - name: skill-patterns
+              mountPath: /etc/mcp-governance/skill-patterns
+              readOnly: true
+      volumes:
+        - name: skill-patterns
+          configMap:
+            name: mcp-governance-skill-patterns
+            optional: true
 ---
 # Dashboard Service (NodePort for Kind access)
 apiVersion: v1

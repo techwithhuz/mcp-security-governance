@@ -26,6 +26,27 @@ type PatternSet struct {
 
 	// SKL-SEC-006: categories that MUST mention safety guardrail phrases
 	SafetyGuardrails []SafetyGuardrailRule
+
+	// SKL-SEC-007: suspicious download URL patterns
+	SuspiciousDownloadURLs []string
+
+	// SKL-SEC-008: hardcoded secret keyword patterns
+	HardcodedSecrets []string
+
+	// SKL-SEC-009: direct financial execution patterns
+	FinancialExecution []string
+
+	// SKL-SEC-010: untrusted third-party content ingestion
+	UntrustedContent []string
+
+	// SKL-SEC-011: unverifiable external runtime dependency
+	ExternalRuntimeDependency []string
+
+	// SKL-SEC-012: system service modification patterns
+	SystemServiceModification []string
+
+	// SKL-SEC-013: required SKILL.md frontmatter field names
+	RequiredFrontmatterFields []string
 }
 
 // ScopeCreepRule flags skills whose content contains out-of-scope keywords
@@ -170,6 +191,54 @@ func DefaultPatternSet() *PatternSet {
 				},
 			},
 		},
+		SuspiciousDownloadURLs: []string{
+			".exe", ".bat", ".cmd", ".dmg", ".msi", ".ps1",
+			"bit.ly/", "tinyurl.com/", "t.co/", "dropbox.com/s/", "mega.nz/",
+			"releases/download/",
+			"authtool", "osascript -e",
+			"curl -fsSL", "curl -o /tmp", "wget -q -O", "wget --quiet",
+		},
+		HardcodedSecrets: []string{
+			"sk-proj-", "sk-ant-", "ghp_", "gho_", "github_pat_", "glpat-", "AKIA",
+			"xoxb-", "xoxp-", "xoxa-",
+			"private_key_here", "insert_your_api_key", "replace_with_token",
+			"seed phrase", "mnemonic phrase", "wallet mnemonic", "recovery phrase",
+		},
+		FinancialExecution: []string{
+			"execute trade", "execute swap", "place order", "submit order",
+			"confirm purchase", "initiate payment", "process payment",
+			"wire transfer", "send funds", "transfer funds", "withdraw funds",
+			"defi trading", "snipe token", "front-run",
+			"payment processing", "billing execution", "charge customer",
+			"private key", "wallet private key", "sign transaction",
+		},
+		UntrustedContent: []string{
+			"browse any url", "fetch any url", "fetch any website", "fetch any link",
+			"load any url", "read any website", "visit any url",
+			"scrape twitter", "scrape reddit", "scrape any website",
+			"read social media", "fetch user-supplied url", "follow any link",
+		},
+		ExternalRuntimeDependency: []string{
+			"fetch instructions from", "load instructions from",
+			"auto-update skill", "self-update",
+			"fetch and execute", "download and run", "download and execute",
+			"curl | python", "curl | bash", "curl | sh",
+			"wget | python", "wget | bash",
+			"pipe to shell", "execute downloaded", "run downloaded script",
+		},
+		SystemServiceModification: []string{
+			"launchctl load", "launchctl start", "launchctl stop", "launchctl enable",
+			"systemctl enable", "systemctl disable", "systemctl start", "systemctl stop",
+			"service install", "install service",
+			"crontab -e", "cron job",
+			"/etc/rc.local", "/etc/init.d/", "/etc/sudoers",
+			`HKLM\Software\Microsoft\Windows\CurrentVersion\Run`,
+			"registry run key", "startup registry", "persistence mechanism",
+		},
+		RequiredFrontmatterFields: []string{
+			"name",
+			"description",
+		},
 	}
 }
 
@@ -214,6 +283,48 @@ func ParsePatternSet(data map[string]string) *PatternSet {
 		ps.SafetyGuardrails = parseSafetyGuardrails(raw)
 	} else {
 		ps.SafetyGuardrails = defaults.SafetyGuardrails
+	}
+
+	if raw, ok := data["suspicious-download-urls"]; ok {
+		ps.SuspiciousDownloadURLs = parseLines(raw)
+	} else {
+		ps.SuspiciousDownloadURLs = defaults.SuspiciousDownloadURLs
+	}
+
+	if raw, ok := data["hardcoded-secrets"]; ok {
+		ps.HardcodedSecrets = parseLines(raw)
+	} else {
+		ps.HardcodedSecrets = defaults.HardcodedSecrets
+	}
+
+	if raw, ok := data["financial-execution"]; ok {
+		ps.FinancialExecution = parseLines(raw)
+	} else {
+		ps.FinancialExecution = defaults.FinancialExecution
+	}
+
+	if raw, ok := data["untrusted-content"]; ok {
+		ps.UntrustedContent = parseLines(raw)
+	} else {
+		ps.UntrustedContent = defaults.UntrustedContent
+	}
+
+	if raw, ok := data["external-runtime-dependency"]; ok {
+		ps.ExternalRuntimeDependency = parseLines(raw)
+	} else {
+		ps.ExternalRuntimeDependency = defaults.ExternalRuntimeDependency
+	}
+
+	if raw, ok := data["system-service-modification"]; ok {
+		ps.SystemServiceModification = parseLines(raw)
+	} else {
+		ps.SystemServiceModification = defaults.SystemServiceModification
+	}
+
+	if raw, ok := data["required-frontmatter-fields"]; ok {
+		ps.RequiredFrontmatterFields = parseLines(raw)
+	} else {
+		ps.RequiredFrontmatterFields = defaults.RequiredFrontmatterFields
 	}
 
 	return ps

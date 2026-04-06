@@ -99,3 +99,128 @@ data:
     database: confirmation required, dry run, requires approval, cannot be undone, irreversible, backup recommended
     infra: confirmation required, requires approval, change management, review before applying, dry run
     admin: admin access required, requires elevated privileges, audit logged, requires approval, multi-factor
+
+  # SKL-SEC-007: Suspicious download URLs
+  suspicious-download-urls: |
+    .exe
+    .bat
+    .cmd
+    .dmg
+    .msi
+    .ps1
+    bit.ly/
+    tinyurl.com/
+    t.co/
+    dropbox.com/s/
+    mega.nz/
+    releases/download/
+    authtool
+    osascript -e
+    curl -fsSL
+    curl -o /tmp
+    wget -q -O
+    wget --quiet
+
+  # SKL-SEC-008: Hardcoded secrets — keyword patterns
+  hardcoded-secrets: |
+    sk-proj-
+    sk-ant-
+    ghp_
+    gho_
+    github_pat_
+    glpat-
+    AKIA
+    xoxb-
+    xoxp-
+    xoxa-
+    private_key_here
+    insert_your_api_key
+    replace_with_token
+    seed phrase
+    mnemonic phrase
+    wallet mnemonic
+    recovery phrase
+
+  # SKL-SEC-009: Direct financial execution
+  financial-execution: |
+    execute trade
+    execute swap
+    place order
+    submit order
+    confirm purchase
+    initiate payment
+    process payment
+    wire transfer
+    send funds
+    transfer funds
+    withdraw funds
+    defi trading
+    snipe token
+    front-run
+    payment processing
+    billing execution
+    charge customer
+    private key
+    wallet private key
+    sign transaction
+
+  # SKL-SEC-010: Untrusted third-party content ingestion
+  untrusted-content: |
+    browse any url
+    fetch any url
+    fetch any website
+    fetch any link
+    load any url
+    read any website
+    visit any url
+    scrape twitter
+    scrape reddit
+    scrape any website
+    read social media
+    fetch user-supplied url
+    follow any link
+
+  # SKL-SEC-011: Unverifiable external runtime dependency
+  external-runtime-dependency: |
+    fetch instructions from
+    load instructions from
+    auto-update skill
+    self-update
+    fetch and execute
+    download and run
+    download and execute
+    curl | python
+    curl | bash
+    curl | sh
+    wget | python
+    wget | bash
+    pipe to shell
+    execute downloaded
+    run downloaded script
+
+  # SKL-SEC-012: System service modification
+  system-service-modification: |
+    launchctl load
+    launchctl start
+    launchctl stop
+    launchctl enable
+    systemctl enable
+    systemctl disable
+    systemctl start
+    systemctl stop
+    service install
+    install service
+    crontab -e
+    cron job
+    /etc/rc.local
+    /etc/init.d/
+    /etc/sudoers
+    HKLM\Software\Microsoft\Windows\CurrentVersion\Run
+    registry run key
+    startup registry
+    persistence mechanism
+
+  # SKL-SEC-013: Required SKILL.md frontmatter fields
+  required-frontmatter-fields: |
+    name
+    description

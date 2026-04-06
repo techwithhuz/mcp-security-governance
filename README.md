@@ -22,6 +22,15 @@
 
 ---
 
+## 📖 Documentation
+
+**All detailed documentation has been moved to the [`docs/`](./docs/) folder.** Start with:
+- **[`docs/DOCUMENTATION_INDEX.md`](./docs/DOCUMENTATION_INDEX.md)** — Complete documentation guide with learning paths for different roles
+- **[`docs/QUICK_REFERENCE.md`](./docs/QUICK_REFERENCE.md)** — Quick 2-minute overview
+- **[`docs/IMPLEMENTATION_SUMMARY.md`](./docs/IMPLEMENTATION_SUMMARY.md)** — Feature overview and usage
+
+---
+
 ## Table of Contents
 
 - [Overview](#-overview)
@@ -29,6 +38,8 @@
 - [What It Checks](#-what-it-checks)
 - [Hardened Deployment Security](#️-hardened-deployment-security)
 - [Verified Catalog Scoring](#-verified-catalog-scoring)
+- [Skills Catalog Governance](#-skills-catalog-governance)
+- [Skills On-Demand Scanner](#-skills-on-demand-scanner)
 - [Governance Controller Status Updates](#-governance-controller-status-updates)
 - [MCP-Server-Centric Scoring](#-mcp-server-centric-scoring)
 - [Scoring Model](#-scoring-model)
@@ -474,7 +485,228 @@ spec:
 
 ---
 
-## 🔄 Governance Controller Status Updates
+## � Skills Catalog Governance
+
+**Skills Catalog Governance** scores `SkillCatalog` Kubernetes resources (CRD: `agentregistry.dev/v1alpha1`) for metadata completeness and security posture. Unlike Verified Catalog (which scores MCP server entries), Skills Catalog governance evaluates the **skill definitions** (YAML/Markdown files) stored in GitHub repositories.
+
+### What is a SkillCatalog?
+
+A `SkillCatalog` CR declares a collection of AI agent skills stored in a GitHub repository. Each skill is typically described in a `SKILL.md` file. MCP-G evaluates both the CR metadata and the actual file content for security issues.
+
+```yaml
+apiVersion: agentregistry.dev/v1alpha1
+kind: SkillCatalog
+metadata:
+  name: agent-skills-v1
+  namespace: default
+spec:
+  version: "1.0.0"
+  category: "automation"
+  description: "Production-ready skills for CI/CD automation agents"
+  repository:
+    source: github
+    url: https://github.com/myorg/agent-skills
+  websiteUrl: https://github.com/myorg/agent-skills/tree/main/skills
+```
+
+> **Tip:** Set `spec.websiteUrl` to the exact GitHub tree URL of the skills folder. MCP-G uses this to auto-scope the security scan to only that folder, speeding up scans significantly.
+
+### Metadata Checks (Controller-side, SKL-001–SKL-008)
+
+These checks run on every reconciliation cycle against the CR spec — no file access required:
+
+| Check ID | Title | Severity | What's Verified |
+|----------|-------|----------|-----------------|
+| SKL-001 | Version Specified | Medium | `spec.version` is set |
+| SKL-002 | Repository Source Known | Low | `spec.repository.source` is github/gitlab/bitbucket |
+| SKL-003 | HTTPS Repository URL | High | `spec.repository.url` uses HTTPS |
+| SKL-004 | Resource UID Label | Low | `agentregistry.dev/resource-uid` label present |
+| SKL-005 | Category Specified | Low | `spec.category` is set |
+| SKL-006 | Description Provided | Low | `spec.description` ≥ 20 characters |
+| SKL-007 | Production Versioning | Medium | Production skills have a version pin |
+| SKL-008 | Organization Repository | Medium | Not a personal GitHub account (no `/users/` in URL) |
+
+### Security Checks (Browser On-Demand Scanner, SKL-SEC-001–SKL-SEC-013)
+
+These checks are run by the browser-based scanner against the actual repository file content:
+
+| Check ID | Title | Severity | Pattern Detected |
+|----------|-------|----------|-----------------|
+| SKL-SEC-001 | Prompt Injection Patterns | **Critical** | `ignore previous instructions`, `jailbreak`, `DAN mode` |
+| SKL-SEC-002 | Privilege Escalation | **Critical** | `sudo`, `chmod 777`, `setenforce 0`, `visudo` |
+| SKL-SEC-003 | Data Exfiltration URLs | **High** | `curl`/`wget` to external hosts |
+| SKL-SEC-004 | Hardcoded Secrets | **High** | API keys, passwords, tokens in plaintext |
+| SKL-SEC-005 | Dangerous Commands | **High** | `rm -rf`, `DROP TABLE`, `format c:` |
+| SKL-SEC-006 | Safety Guardrails | **Medium** | Database/infra skills missing safety phrases |
+| SKL-SEC-007 | SSRF Patterns | **Critical** | Access to `169.254.x`, `10.x`, `metadata.google.internal` |
+| SKL-SEC-008 | Code Injection | **High** | `eval()`, `exec()`, `shell_exec()` |
+| SKL-SEC-009 | Path Traversal | **Medium** | `../` directory traversal sequences |
+| SKL-SEC-010 | Insecure Protocols | **Medium** | Plaintext `http://` endpoints |
+| SKL-SEC-011 | XXE Injection | **High** | XML External Entity patterns |
+| SKL-SEC-012 | Template Injection | **Medium** | `{{ 7*7 }}`, `<%=`, `${T()}` SSTI patterns |
+| SKL-SEC-013 | Unvalidated Redirects | **Medium** | Open redirect patterns |
+
+### Scoring Formula
+
+Score starts at **100** and deductions are applied per unique failing check:
+
+| Severity | Deduction |
+|----------|-----------|
+| Critical | −40 pts |
+| High | −25 pts |
+| Medium | −15 pts |
+| Low | −5 pts |
+
+**Status thresholds:** ≥80 → `pass` · 50–79 → `warning` · <50 → `fail`
+
+Score is floored at 0 (cannot go negative).
+
+**Important distinction:** The controller computes score from metadata checks only (it does not scan file content). The dashboard's on-demand browser scanner applies the full formula including security checks, which is the authoritative score displayed in the UI.
+
+### API Endpoint
+
+```
+GET /api/governance/skill-catalogs
+```
+
+```json
+{
+  "catalogs": [
+    {
+      "name": "agent-skills-v1",
+      "namespace": "default",
+      "version": "1.0.0",
+      "category": "automation",
+      "repoURL": "https://github.com/myorg/agent-skills",
+      "websiteUrl": "https://github.com/myorg/agent-skills/tree/main/skills",
+      "score": 85,
+      "status": "pass",
+      "scannedFiles": 0,
+      "findings": [
+        {
+          "checkID": "SKL-008",
+          "severity": "Medium",
+          "category": "Metadata",
+          "title": "Organization Repository",
+          "remediation": "Move repository to a GitHub organization account"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "passCount": 3,
+    "warningCount": 1,
+    "failCount": 0,
+    "averageScore": 88
+  }
+}
+```
+
+---
+
+## 🔍 Skills On-Demand Scanner
+
+The **Skills On-Demand Scanner** is a browser-native security tool that scans GitHub repositories for security issues in skill files — directly from your browser, with no cluster-side file access required.
+
+### Architecture
+
+```
+Browser → POST /api/scan/repo (Next.js route handler)
+             ↓
+        GitHub API (direct from server-side Next.js)
+             ↓
+        Per-folder tree traversal + pattern matching
+             ↓
+        13 security checks applied to SKILL.md files
+             ↓
+        Results cached in sessionStorage (browser)
+```
+
+The `/api/scan/repo` endpoint is a **local Next.js route handler** — it is explicitly excluded from the middleware proxy. Middleware skips `/api/scan/*`, so these requests never go to the governance controller.
+
+### Auto-Scan Behavior
+
+When you open the **Skills Catalog** tab, MCP-G automatically scans any catalog that:
+1. Has a `repoURL` set on the SkillCatalog CR
+2. Has not been scanned yet in the current browser session
+
+The folder path is extracted from `websiteUrl` (the part after `/tree/main/`). If `websiteUrl` is not set, the full repository root is scanned.
+
+### Standalone Usage
+
+Use the **Skills On-Demand Scanner** tab to scan any repository without a SkillCatalog CR:
+
+1. Enter the GitHub repository URL
+2. (Optional) Specify a subfolder path to scope the scan
+3. (Optional) Provide a GitHub PAT for private repositories — stored in `localStorage` per-hostname, never sent to the controller
+4. Click **Scan** — results appear per folder with a per-folder security breakdown
+
+### Session Persistence
+
+Scan results are persisted in `sessionStorage` under the key `skillcatalog_scan_results`. This means:
+
+- ✅ Results survive tab navigation and page refreshes within the same browser session
+- ✅ The Overview page reads cached results and shows the effective score (not the controller metadata score)
+- ✅ Summary counts (Pass/Warning/Fail) on the Skills Catalog tab are recomputed from live scan results
+- ⚠️ Results are cleared when the browser tab/window is closed
+
+### Scan API Reference
+
+**Request:**
+```
+POST /api/scan/repo
+Content-Type: application/json
+
+{
+  "repoUrl": "https://github.com/myorg/agent-skills",
+  "folderPath": "skills",
+  "catalogName": "agent-skills-v1",
+  "namespace": "default",
+  "credentialToken": "ghp_..."
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "scanPath": "skills",
+  "folderResults": [
+    {
+      "folderPath": "skills/automation",
+      "filesScanned": 3,
+      "score": 0,
+      "status": "fail",
+      "securityChecks": [
+        {
+          "id": "SKL-SEC-002",
+          "name": "Privilege Escalation",
+          "passed": false,
+          "severity": "Critical",
+          "description": "Privilege escalation pattern detected in skill content",
+          "remediation": "Remove sudo/chmod 777/setenforce commands from skill definitions"
+        }
+      ],
+      "findings": [
+        {
+          "checkID": "SKL-SEC-002",
+          "severity": "Critical",
+          "category": "Security",
+          "title": "Privilege Escalation",
+          "filePath": "skills/automation/SKILL.md",
+          "line": 14,
+          "matchedPattern": "sudo chmod 777"
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## �🔄 Governance Controller Status Updates
 
 The governance controller automatically updates the `.status.publisher` field of catalog resources with verified governance scores in real-time. This enables the Agent Registry UI and other integrations to display trust badges and governance grades directly on catalog cards.
 

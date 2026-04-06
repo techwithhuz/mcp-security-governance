@@ -1535,6 +1535,7 @@ func (d *K8sDiscoverer) UpdateEvaluationStatus(ctx context.Context, policyName s
 				"version":      scs.Version,
 				"category":     scs.Category,
 				"repoURL":      scs.RepoURL,
+				"websiteUrl":   scs.WebsiteURL,
 				"score":        int64(scs.Score),
 				"status":       scs.Status,
 				"scannedFiles": int64(scs.ScannedFiles),
@@ -1712,6 +1713,9 @@ func (d *K8sDiscoverer) discoverSkillCatalogs(ctx context.Context) []evaluator.S
 				sc.RepoSource, _ = getNestedString(repoMap, "source")
 				sc.RepoURL, _ = getNestedString(repoMap, "url")
 			}
+
+			// spec.websiteUrl — may point directly to the skills folder (e.g. a GitHub tree URL)
+			sc.WebsiteURL, _ = getNestedString(spec, "websiteUrl")
 		}
 
 		catalogs = append(catalogs, sc)

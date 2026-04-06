@@ -64,6 +64,7 @@ type SkillCatalogResource struct {
 	Title       string
 	RepoSource  string // spec.repository.source (e.g. "github")
 	RepoURL     string // spec.repository.url
+	WebsiteURL  string // spec.websiteUrl — may contain the exact path to the skills folder
 	Environment string // label agentregistry.dev/resource-environment
 	ResourceUID string // label agentregistry.dev/resource-uid
 	Labels      map[string]string
@@ -344,15 +345,17 @@ type EvaluationResult struct {
 
 // SkillCatalogScore is the per-catalog governance score written to the status CR.
 type SkillCatalogScore struct {
-	Name         string              `json:"name"`
-	Namespace    string              `json:"namespace"`
-	Version      string              `json:"version"`
-	Category     string              `json:"category"`
-	RepoURL      string              `json:"repoURL,omitempty"`
-	Score        int                 `json:"score"`
-	Status       string              `json:"status"` // "pass", "warning", "fail"
-	Findings     []SkillCatalogFinding `json:"findings,omitempty"`
-	ScannedFiles int                 `json:"scannedFiles"`
+	Name             string                `json:"name"`
+	Namespace        string                `json:"namespace"`
+	Version          string                `json:"version"`
+	Category         string                `json:"category"`
+	RepoURL          string                `json:"repoURL,omitempty"`
+	WebsiteURL       string                `json:"websiteUrl,omitempty"` // spec.websiteUrl — exact path to skills folder
+	Score            int                   `json:"score"`
+	Status           string                `json:"status"` // "pass", "warning", "fail"
+	Findings         []SkillCatalogFinding `json:"findings,omitempty"`
+	ScannedFiles     int                   `json:"scannedFiles"`
+	SecurityScanned  bool                  `json:"securityScanned"` // true only when repo content was actually scanned
 }
 
 // SkillCatalogFinding is a serialisable governance finding for a SkillCatalog.

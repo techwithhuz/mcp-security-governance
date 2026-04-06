@@ -335,10 +335,12 @@ export interface SkillCatalogScore {
   version: string;
   category: string;
   repoURL?: string;
+  websiteUrl?: string;  // spec.websiteUrl — may contain exact URL to the skills folder
   score: number;
   status: 'pass' | 'warning' | 'fail';
   findings: SkillCatalogFinding[];
   scannedFiles: number;
+  securityScanned?: boolean;
 }
 
 export interface SkillCatalogsSummary {
