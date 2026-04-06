@@ -2,6 +2,13 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: mcpgovernancepolicies.governance.mcp.io
+  labels:
+    app.kubernetes.io/name: mcp-governance
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: mcp-governance
+  annotations:
+    meta.helm.sh/release-name: mcp-governance
+    meta.helm.sh/release-namespace: mcp-governance
 spec:
   group: governance.mcp.io
   versions:

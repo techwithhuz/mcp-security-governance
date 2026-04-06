@@ -74,6 +74,32 @@ spec:
     scanInterval: "5m"
     # Set to false to disable periodic scanning (manual-only via dashboard button)
     scanEnabled: true
+  # Skills Catalog governance configuration
+  # Controls security checks, metadata validation, and scoring for AI skills
+  skillGovernance:
+    # Enable Skills Catalog governance and security scanning
+    enabled: true
+    # Enable security checks on skill file content (SKL-SEC-001 through SKL-SEC-013)
+    scanRepoContent: true
+    # GitHub token for private repository access (loaded from secret in production)
+    githubToken: ""
+    # Scan result cache TTL in minutes (prevents repeated scans for the same catalog/revision)
+    scanCacheTTLMinutes: 60
+    # Fail evaluation if prompt injection patterns detected (SKL-SEC-001)
+    failOnPromptInjection: true
+    # Fail evaluation if privilege escalation patterns detected (SKL-SEC-002)
+    failOnPrivilegeEscalation: true
+    # Allowed external domains for safe HTTP calls (e.g., analytics, logging)
+    # URLs matching these patterns are not flagged as SSRF/exfiltration
+    allowedExternalDomains:
+      - "api.github.com"
+      - "api.gitlab.com"
+    # Skill categories that MUST contain safety guardrail phrases (SKL-SEC-006)
+    # Checks for phrases like "requires approval", "confirm before", "dangerous operation"
+    requireSafetyGuardrails:
+      - "database"
+      - "infra"
+      - "admin"
 ---
 # Sample GovernanceEvaluation trigger
 apiVersion: governance.mcp.io/v1alpha1
