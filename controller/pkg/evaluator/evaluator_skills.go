@@ -46,6 +46,7 @@ func checkSkillCatalogs(state *ClusterState, policy Policy, patternLoader *skill
 		score := scoreSkillCatalog(skill, metaFindings, contentFindings, policy)
 		score.ScannedFiles = scannedFiles
 		score.SecurityScanned = securityScanned
+
 		scores = append(scores, score)
 	}
 

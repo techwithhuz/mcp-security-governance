@@ -541,27 +541,25 @@ spec:
                             severity:
                               type: string
                               enum: ["Critical", "High", "Medium", "Low"]
+                              description: "Severity level of the finding"
                             category:
                               type: string
+                              description: "Finding category (e.g., Security, Metadata)"
                             title:
                               type: string
+                              description: "Title of the finding"
                             remediation:
                               type: string
+                              description: "Remediation steps"
                             filePath:
                               type: string
+                              description: "Path to the file with the issue"
                             line:
                               type: integer
+                              description: "Line number where the issue was found"
                             matchedPattern:
                               type: string
-                          properties:
-                            id:
-                              type: string
-                            name:
-                              type: string
-                            points:
-                              type: integer
-                            maxPoints:
-                              type: integer
+                              description: "Pattern that was matched"
       subresources:
         status: {}
       additionalPrinterColumns:
